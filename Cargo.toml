@@ -1,0 +1,23 @@
+[package]
+name = "smr-swap"
+version = "0.1.0"
+edition = "2024"
+authors = ["ShaoG <shaog.rs@gmail.com>"]
+description = "A lock-free, high-performance Single-Writer Multiple-Reader swap container using epoch-based memory reclamation"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ShaoG-R/smr-swap"
+homepage = "https://github.com/ShaoG-R/smr-swap"
+documentation = "https://docs.rs/smr-swap"
+keywords = ["lock-free", "concurrent", "memory-reclamation", "epoch", "swap"]
+categories = ["concurrency", "data-structures"]
+
+[dependencies]
+crossbeam-epoch = "0.9.18"
+
+[dev-dependencies]
+arc-swap = "1.7"
+criterion = { version = "0.7.0", features = ["html_reports"] }
+
+[[bench]]
+name = "comparison"
+harness = false
