@@ -14,10 +14,10 @@ fn bench_single_thread_read(c: &mut Criterion) {
 
     // SMR-Swap 单线程读取
     group.bench_function("smr_swap", |b| {
-        let (_swapper, reader) = smr_swap::new(Arc::new(vec![1; 1000]));
+        let (_swapper, reader) = smr_swap::new(vec![1; 1000]);
         b.iter(|| {
             let guard = reader.read().unwrap();
-            black_box(&**guard);
+            black_box(&*guard);
         });
     });
 
@@ -42,11 +42,11 @@ fn bench_single_thread_write(c: &mut Criterion) {
 
     // SMR-Swap 单线程写入
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, _reader) = smr_swap::new(Arc::new(vec![1; 1000]));
+        let (mut swapper, _reader) = smr_swap::new(vec![1; 1000]);
         let mut counter = 0;
         b.iter(|| {
             counter += 1;
-            swapper.update(Arc::new(vec![counter; 1000]));
+            swapper.update(vec![counter; 1000]);
         });
     });
 
@@ -77,7 +77,7 @@ fn bench_multi_thread_read(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (_swapper, reader) = smr_swap::new(Arc::new(vec![1; 1000]));
+                    let (_swapper, reader) = smr_swap::new(vec![1; 1000]);
                     let reader = Arc::new(reader);
                     
                     let start = std::time::Instant::now();
@@ -87,7 +87,7 @@ fn bench_multi_thread_read(c: &mut Criterion) {
                             s.spawn(move || {
                                 for _ in 0..iters {
                                     let guard = reader_clone.read().unwrap();
-                                    black_box(&**guard);
+                                    black_box(&*guard);
                                 }
                             });
                         }
@@ -140,7 +140,7 @@ fn bench_mixed_read_write(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (mut swapper, reader) = smr_swap::new(Arc::new(vec![1; 1000]));
+                    let (mut swapper, reader) = smr_swap::new(vec![1; 1000]);
                     let reader = Arc::new(reader);
 
                     let start = std::time::Instant::now();
@@ -148,7 +148,7 @@ fn bench_mixed_read_write(c: &mut Criterion) {
                         // 写入者线程
                         s.spawn(|| {
                             for i in 0..iters {
-                                swapper.update(Arc::new(vec![i as u32; 1000]));
+                                swapper.update(vec![i as u32; 1000]);
                             }
                         });
 
@@ -158,7 +158,7 @@ fn bench_mixed_read_write(c: &mut Criterion) {
                             s.spawn(move || {
                                 for _ in 0..iters {
                                     let guard = reader_clone.read().unwrap();
-                                    black_box(&**guard);
+                                    black_box(&*guard);
                                 }
                             });
                         }
@@ -215,7 +215,7 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
 
     // SMR-Swap: 读取者持有守卫，写入者写入
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, reader) = smr_swap::new(Arc::new(vec![1; 1000]));
+        let (mut swapper, reader) = smr_swap::new(vec![1; 1000]);
         let reader = Arc::new(reader);
 
         b.iter_custom(|iters| {
@@ -231,7 +231,7 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
 
                 // 写入者尝试写入
                 for i in 0..iters {
-                    swapper.update(Arc::new(vec![i as u32; 1000]));
+                    swapper.update(vec![i as u32; 1000]);
                 }
             });
             start.elapsed()
@@ -274,7 +274,7 @@ fn bench_batch_read(c: &mut Criterion) {
 
     // SMR-Swap: 批量读取（单个 pin 内多次读取）
     group.bench_function("smr_swap_batch", |b| {
-        let (_swapper, reader) = smr_swap::new(Arc::new(vec![1; 1000]));
+        let (_swapper, reader) = smr_swap::new(vec![1; 1000]);
         let reader = Arc::new(reader);
 
         b.iter_custom(|iters| {
@@ -287,7 +287,7 @@ fn bench_batch_read(c: &mut Criterion) {
                             // 批量读取：一个 pin 内多次读取
                             let guard = reader_clone.read().unwrap();
                             for _ in 0..10 {
-                                black_box(&**guard);
+                                black_box(&*guard);
                             }
                         }
                     });
@@ -333,12 +333,12 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
 
     // SMR-Swap: 频繁写入导致内存压力
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, reader) = smr_swap::new(Arc::new(vec![0; 10000]));
+        let (mut swapper, reader) = smr_swap::new(vec![0; 10000]);
         let reader = Arc::new(reader);
 
         // 预先进行大量写入以积累垃圾
         for i in 0..1000 {
-            swapper.update(Arc::new(vec![i; 10000]));
+            swapper.update(vec![i; 10000]);
         }
 
         b.iter_custom(|iters| {
@@ -348,13 +348,13 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
                 s.spawn(move || {
                     for _ in 0..iters {
                         let guard = reader_clone.read().unwrap();
-                        black_box(&**guard);
+                        black_box(&*guard);
                     }
                 });
 
                 // 同时进行写入
                 for i in 0..iters {
-                    swapper.update(Arc::new(vec![i as u32; 10000]));
+                    swapper.update(vec![i as u32; 10000]);
                 }
             });
             start.elapsed()
