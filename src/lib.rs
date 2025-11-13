@@ -50,6 +50,7 @@ pub fn new<T>(initial: T) -> (Swapper<T>, SwapReader<T>) {
     (writer, reader)
 }
 
+
 impl<T> Swapper<T> {
     /// Perform a write operation to update the current version
     ///
@@ -99,35 +100,6 @@ impl<T> Swapper<T> {
         })
     }
 
-    /// Swap the value and return the old value
-    ///
-    /// This method atomically replaces the current value and returns ownership of the old value.
-    /// Returns None if the container has been destroyed.
-    ///
-    /// 交换值并返回旧值
-    ///
-    /// 这个方法原子地替换当前值，并返回旧值的所有权
-    /// 返回 None 如果容器已被销毁
-    pub fn swap(&mut self, new_value: T) -> Option<T> {
-        let guard = &epoch::pin();
-        let new_owned = Owned::new(new_value);
-        let new_shared = new_owned.into_shared(guard);
-
-        let old = self.inner.current.swap(new_shared, Ordering::Release, guard);
-
-        if old.is_null() {
-            return None;
-        }
-
-        unsafe {
-            // SAFETY: old is a valid Shared pointer pointing to heap-allocated T
-            // SAFETY: old 是有效的 Shared 指针，指向堆上分配的 T
-            let old_ptr = old.as_ref().unwrap() as *const T as *mut T;
-            let old_box = Box::from_raw(old_ptr);
-            Some(*old_box)
-        }
-    }
-
     /// Apply a closure function to the current value and return the result
     ///
     /// The closure receives a reference to the current value and returns a new value.
@@ -150,16 +122,75 @@ impl<T> Swapper<T> {
             None
         }
     }
+}
 
-    /// Get a clone of the internal Arc for sharing the writer across threads
+impl<T> Swapper<Arc<T>> {
+    /// Atomically swap the current Arc value with a new one
     ///
-    /// Note: This breaks the single-writer guarantee and should be used with caution.
+    /// This method replaces the current Arc-wrapped value with a new one and returns the old value.
+    /// Returns None if the container has been destroyed.
     ///
-    /// 获取对内部 Arc 的克隆，用于在多线程中共享写入者
+    /// 原子地将当前 Arc 值与新值交换
     ///
-    /// 注意：这破坏了单写入者的保证，应谨慎使用
-    pub fn clone_inner(&self) -> Arc<SwapState<T>> {
-        self.inner.clone()
+    /// 这个方法用新的 Arc 包装值替换当前值，并返回旧值
+    /// 如果容器已被销毁，返回 None
+    pub fn swap(&mut self, new_value: Arc<T>) -> Option<Arc<T>> {
+        // Must use pin() to safely perform defer_destroy
+        // 必须使用 pin() 来安全地进行 defer_destroy
+        let guard = &epoch::pin();
+
+        let new_owned = Owned::new(new_value);
+        let new_shared = new_owned.into_shared(guard);
+
+        // Atomically swap the pointer
+        // 原子地切换指针
+        let old_shared = self.inner.current.swap(new_shared, Ordering::Release, guard);
+
+        if old_shared.is_null() {
+            return None;
+        }
+
+        unsafe {
+            // SAFETY:
+            // - We checked that old_shared is not null
+            // - guard ensures the epoch does not advance and the version is not reclaimed
+            // SAFETY:
+            // - 我们检查了 old_shared 不为 null
+            // - guard 确保 epoch 不会推进，版本不会被回收
+            let old_owned = old_shared.deref().clone();
+
+            // Defer destruction of the old version
+            // 延迟回收旧版本
+            guard.defer_destroy(old_shared);
+
+            Some(old_owned)
+        }
+    }
+
+    /// Apply a closure function to the current value and return the result as an Arc
+    ///
+    /// This method reads the current value, passes it to the closure which returns a new value,
+    /// then wraps the new value in an Arc and swaps it with the current value.
+    /// Returns None if the container has been destroyed.
+    ///
+    /// 对当前值应用闭包函数并将结果作为 Arc 返回
+    ///
+    /// 这个方法读取当前值，将其传递给闭包（闭包返回新值），
+    /// 然后将新值包装在 Arc 中并与当前值交换
+    /// 如果容器已被销毁，返回 None
+    pub fn update_and_fetch_arc<F>(&mut self, f: F) -> Option<Arc<T>>
+    where
+        F: FnOnce(&Arc<T>) -> Arc<T>,
+    {
+        let current_guard = self.read();
+        if let Some(guard) = current_guard {
+            let new_value = f(&*guard);
+            drop(guard);
+            self.swap(new_value.clone());
+            Some(new_value)
+        } else {
+            None
+        }
     }
 }
 

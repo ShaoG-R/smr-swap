@@ -120,43 +120,6 @@ fn test_reader_try_clone_value_vector() {
     assert_eq!(cloned, vec![4, 5, 6]);
 }
 
-/// Test writer swap operation
-/// 测试写入者交换操作
-#[test]
-fn test_writer_swap() {
-    let (mut swapper, reader) = new(10);
-
-    let old = swapper.swap(20).unwrap();
-    assert_eq!(old, 10);
-    assert_eq!(*reader.read().unwrap(), 20);
-
-    let old = swapper.swap(30).unwrap();
-    assert_eq!(old, 20);
-    assert_eq!(*reader.read().unwrap(), 30);
-}
-
-/// Test writer swap with strings
-/// 测试写入者交换（字符串）
-#[test]
-fn test_writer_swap_string() {
-    let (mut swapper, reader) = new(String::from("initial"));
-
-    let old = swapper.swap(String::from("updated")).unwrap();
-    assert_eq!(old, "initial");
-    assert_eq!(*reader.read().unwrap(), "updated");
-}
-
-/// Test writer swap with vectors
-/// 测试写入者交换（向量）
-#[test]
-fn test_writer_swap_vector() {
-    let (mut swapper, reader) = new(vec![1, 2, 3]);
-
-    let old = swapper.swap(vec![4, 5, 6]).unwrap();
-    assert_eq!(&old, &vec![1, 2, 3]);
-    assert_eq!(&*reader.read().unwrap(), &vec![4, 5, 6]);
-}
-
 /// Test writer update_and_fetch operation
 /// 测试写入者 update_and_fetch 操作
 #[test]
@@ -322,19 +285,6 @@ fn test_filter_complex_condition() {
         s.len() > 3 && s.contains('l')
     });
     assert!(guard.is_none());
-}
-
-/// Test sequential swaps
-/// 测试连续交换
-#[test]
-fn test_sequential_swaps() {
-    let (mut swapper, reader) = new(1);
-
-    for i in 2..=10 {
-        let old = swapper.swap(i).unwrap();
-        assert_eq!(old, i - 1);
-        assert_eq!(*reader.read().unwrap(), i);
-    }
 }
 
 /// Test update_and_fetch with side effects

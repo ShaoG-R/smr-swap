@@ -88,15 +88,6 @@ Atomically replaces the current value.
 writer.update(new_value);
 ```
 
-#### `swap(new_value: T) -> Option<T>`
-Atomically replaces the current value and returns the old value.
-
-```rust
-if let Some(old) = writer.swap(new_value) {
-    println!("Old value: {:?}", old);
-}
-```
-
 #### `read() -> Option<SwapGuard<T>>`
 Allows the writer to read the current value.
 
@@ -115,6 +106,42 @@ let new_guard = writer.update_and_fetch(|old| {
     v.push(999);
     v
 })?;
+```
+
+### Arc-Specific Writer Operations
+
+The following methods are only available when `T` is wrapped in an `Arc` (i.e., `Swapper<Arc<T>>`):
+
+#### `swap(new_value: Arc<T>) -> Option<Arc<T>>`
+Atomically replaces the current `Arc`-wrapped value and returns the old `Arc`.
+
+```rust
+use std::sync::Arc;
+
+let (mut writer, _) = smr_swap::new(Arc::new(42));
+
+// Swap the value and get the old one
+if let Some(old) = writer.swap(Arc::new(43)) {
+    println!("Old value: {:?}", *old); // 42
+}
+```
+
+#### `update_and_fetch_arc<F>(f: F) -> Option<Arc<T>>`
+Updates the value using a closure that receives the current `Arc` and returns a new `Arc`.
+
+```rust
+use std::sync::Arc;
+
+let (mut writer, _) = smr_swap::new(Arc::new(vec![1, 2, 3]));
+
+// Update the vector by adding an element
+if let Some(new_arc) = writer.update_and_fetch_arc(|current| {
+    let mut vec = current.to_vec();
+    vec.push(4);
+    Arc::new(vec)
+}) {
+    println!("New value: {:?}", *new_arc); // [1, 2, 3, 4]
+}
 ```
 
 ### Reader Operations

@@ -88,15 +88,6 @@ let (swapper, reader) = smr_swap::new(initial_value);
 writer.update(new_value);
 ```
 
-#### `swap(new_value: T) -> Option<T>`
-原子地替换当前值并返回旧值。
-
-```rust
-if let Some(old) = writer.swap(new_value) {
-    println!("旧值: {:?}", old);
-}
-```
-
 #### `read() -> Option<SwapGuard<T>>`
 允许写入者读取当前值。
 
@@ -115,6 +106,42 @@ let new_guard = writer.update_and_fetch(|old| {
     v.push(999);
     v
 })?;
+```
+
+### Arc 专用的写入者操作
+
+以下方法仅在 `T` 被 `Arc` 包装时可用（即 `Swapper<Arc<T>>`）：
+
+#### `swap(new_value: Arc<T>) -> Option<Arc<T>>`
+原子地替换当前 `Arc` 包装的值并返回旧的 `Arc`。
+
+```rust
+use std::sync::Arc;
+
+let (mut writer, _) = smr_swap::new(Arc::new(42));
+
+// 交换值并获取旧值
+if let Some(old) = writer.swap(Arc::new(43)) {
+    println!("旧值: {:?}", *old); // 42
+}
+```
+
+#### `update_and_fetch_arc<F>(f: F) -> Option<Arc<T>>`
+使用接收当前 `Arc` 并返回新 `Arc` 的闭包来更新值。
+
+```rust
+use std::sync::Arc;
+
+let (mut writer, _) = smr_swap::new(Arc::new(vec![1, 2, 3]));
+
+// 通过添加元素来更新向量
+if let Some(new_arc) = writer.update_and_fetch_arc(|current| {
+    let mut vec = current.to_vec();
+    vec.push(4);
+    Arc::new(vec)
+}) {
+    println!("新值: {:?}", *new_arc); // [1, 2, 3, 4]
+}
 ```
 
 ### 读取者操作
