@@ -25,7 +25,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-smr-swap = "0.1"
+smr-swap = "0.2"
 ```
 
 ### Basic Usage
@@ -44,7 +44,7 @@ fn main() {
     writer.update(vec![4, 5, 6]);
 
     // Reader sees the new value
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     println!("{:?}", *guard); // [4, 5, 6]
 }
 ```
@@ -62,7 +62,7 @@ fn main() {
     
     writer.update(Arc::new(vec![4, 5, 6]));
     
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     println!("{:?}", *guard); // Arc<Vec<i32>>
 }
 ```
@@ -81,7 +81,7 @@ Returns a tuple of:
 - `Swapper<T>`: The writer (not `Clone`, enforces single writer)
 - `SwapReader<T>`: The reader (can be cloned for multiple readers)
 
-### Writer Operations
+### Writer Operations (Swapper<T>)
 
 #### `update(new_value: T)`
 Atomically replaces the current value.
@@ -90,31 +90,48 @@ Atomically replaces the current value.
 writer.update(new_value);
 ```
 
-#### `read() -> Option<SwapGuard<T>>`
-Allows the writer to read the current value.
+#### `read() -> SwapGuard<T>`
+Gets a read-only reference to the current value (via SwapGuard).
 
 ```rust
-if let Some(guard) = writer.read() {
+let guard = writer.read();
+println!("Current: {:?}", *guard);
+```
+
+#### `read_with_guard<F, R>(f: F) -> R where F: FnOnce(&SwapGuard<T>) -> R`
+Executes a closure with a guard, allowing multiple operations on the same pinned version.
+
+```rust
+let len = writer.read_with_guard(|guard| {
     println!("Current: {:?}", *guard);
-}
+    // Perform multiple operations with the same guard
+    (*guard).len()
+});
 ```
 
-#### `update_and_fetch<F>(f: F) -> Option<SwapGuard<T>>`
-Updates based on the current value and returns the new value.
+#### `map<F, U>(&self, f: F) -> U where F: FnOnce(&T) -> U`
+Applies a closure to the current value and returns the result.
 
 ```rust
-let new_guard = writer.update_and_fetch(|old| {
-    let mut v = old.clone();
-    v.push(999);
-    v
-})?;
+let len = writer.map(|v| v.len());
 ```
 
-### Arc-Specific Writer Operations
+#### `update_and_fetch<F>(&mut self, f: F) -> SwapGuard<T> where F: FnOnce(&T) -> T`
+Atomically updates the value using the provided closure and returns a guard to the new value.
 
-The following methods are only available when `T` is wrapped in an `Arc` (i.e., `Swapper<Arc<T>>`):
+```rust
+let guard = writer.update_and_fetch(|v| {
+    let mut new_v = v.clone();
+    new_v.push(42);
+    new_v
+});
+```
 
-#### `swap(new_value: Arc<T>) -> Option<Arc<T>>`
+### Arc-Specific Writer Operations (Swapper<Arc<T>>)
+
+The following methods are only available when `T` is wrapped in an `Arc`:
+
+#### `swap(&mut self, new_value: Arc<T>) -> Arc<T>`
 Atomically replaces the current `Arc`-wrapped value and returns the old `Arc`.
 
 ```rust
@@ -122,13 +139,11 @@ use std::sync::Arc;
 
 let (mut writer, _) = smr_swap::new(Arc::new(42));
 
-// Swap the value and get the old one
-if let Some(old) = writer.swap(Arc::new(43)) {
-    println!("Old value: {:?}", *old); // 42
-}
+let old = writer.swap(Arc::new(43));
+println!("Old value: {:?}", *old); // 42
 ```
 
-#### `update_and_fetch_arc<F>(f: F) -> Option<Arc<T>>`
+#### `update_and_fetch_arc<F>(&mut self, f: F) -> Arc<T> where F: FnOnce(&Arc<T>) -> Arc<T>`
 Updates the value using a closure that receives the current `Arc` and returns a new `Arc`.
 
 ```rust
@@ -136,49 +151,47 @@ use std::sync::Arc;
 
 let (mut writer, _) = smr_swap::new(Arc::new(vec![1, 2, 3]));
 
-// Update the vector by adding an element
-if let Some(new_arc) = writer.update_and_fetch_arc(|current| {
-    let mut vec = current.to_vec();
+let new_arc = writer.update_and_fetch_arc(|current| {
+    let mut vec = (**current).clone();
     vec.push(4);
     Arc::new(vec)
-}) {
-    println!("New value: {:?}", *new_arc); // [1, 2, 3, 4]
-}
+});
+println!("New value: {:?}", *new_arc); // [1, 2, 3, 4]
 ```
 
-### Reader Operations
+### Reader Operations (SwapReader<T>)
 
-#### `read() -> Option<SwapGuard<T>>`
-Reads the current value, returning a guard that ensures the value won't be reclaimed while held.
+#### `read() -> SwapGuard<T>`
+Gets a read-only reference to the current value (via SwapGuard).
 
 ```rust
-if let Some(guard) = reader.read() {
-    println!("Value: {:?}", *guard);
-}
+let guard = reader.read();
+println!("Current: {:?}", *guard);
 ```
 
-#### `map<F, R>(f: F) -> Option<R>`
-Applies a closure to the current value without holding a guard.
+#### `read_with_guard<F, R>(&self, f: F) -> R where F: FnOnce(&SwapGuard<T>) -> R`
+Executes a closure with a guard, allowing multiple operations on the same pinned version.
 
 ```rust
-let doubled = reader.map(|v| v * 2);
+let len = reader.read_with_guard(|guard| {
+    println!("Current: {:?}", *guard);
+    (*guard).len()
+});
 ```
 
-#### `filter<F>(f: F) -> Option<SwapGuard<T>>`
-Returns a guard only if the predicate is true.
+#### `map<F, U>(&self, f: F) -> U where F: FnOnce(&T) -> U`
+Applies a closure to the current value and returns the result.
 
 ```rust
-if let Some(guard) = reader.filter(|v| v > &10) {
-    println!("Value > 10: {:?}", *guard);
-}
+let len = reader.map(|v| v.len());
 ```
 
-#### `try_clone_value() -> Option<T>` (requires `T: Clone`)
-Clones the current value.
+#### `filter<F>(&self, f: F) -> Option<SwapGuard<T>> where F: FnOnce(&T) -> bool`
+Returns a guard to the current value if the closure returns true.
 
 ```rust
-if let Some(cloned) = reader.try_clone_value() {
-    println!("Cloned: {:?}", cloned);
+if let Some(guard) = reader.filter(|v| !v.is_empty()) {
+    println!("Non-empty: {:?}", *guard);
 }
 ```
 

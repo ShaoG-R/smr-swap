@@ -10,7 +10,7 @@ use crate::new;
 #[test]
 fn test_guard_deref() {
     let (_swapper, reader) = new(42);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     // Deref should allow direct access to the value
     // Deref 应该允许直接访问值
@@ -22,7 +22,7 @@ fn test_guard_deref() {
 #[test]
 fn test_guard_deref_string() {
     let (_swapper, reader) = new(String::from("hello"));
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     assert_eq!(*guard, "hello");
     assert_eq!(guard.len(), 5);
@@ -33,7 +33,7 @@ fn test_guard_deref_string() {
 #[test]
 fn test_guard_deref_vector() {
     let (_swapper, reader) = new(vec![1, 2, 3, 4, 5]);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     assert_eq!(*guard, vec![1, 2, 3, 4, 5]);
     assert_eq!(guard.len(), 5);
@@ -45,7 +45,7 @@ fn test_guard_deref_vector() {
 #[test]
 fn test_guard_clone_value() {
     let (_swapper, reader) = new(vec![1, 2, 3]);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     let cloned = guard.clone_value();
     assert_eq!(cloned, vec![1, 2, 3]);
@@ -57,7 +57,7 @@ fn test_guard_clone_value() {
 #[test]
 fn test_guard_clone_value_string() {
     let (_swapper, reader) = new(String::from("test"));
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     let cloned = guard.clone_value();
     assert_eq!(cloned, "test");
@@ -69,7 +69,7 @@ fn test_guard_clone_value_string() {
 #[test]
 fn test_guard_debug() {
     let (_swapper, reader) = new(42);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     let debug_str = format!("{:?}", guard);
     assert!(debug_str.contains("SwapGuard"));
@@ -81,7 +81,7 @@ fn test_guard_debug() {
 #[test]
 fn test_guard_debug_string() {
     let (_swapper, reader) = new(String::from("debug_test"));
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     let debug_str = format!("{:?}", guard);
     assert!(debug_str.contains("SwapGuard"));
@@ -93,7 +93,7 @@ fn test_guard_debug_string() {
 #[test]
 fn test_guard_debug_vector() {
     let (_swapper, reader) = new(vec![1, 2, 3]);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     let debug_str = format!("{:?}", guard);
     assert!(debug_str.contains("SwapGuard"));
@@ -104,7 +104,7 @@ fn test_guard_debug_vector() {
 #[test]
 fn test_guard_display() {
     let (_swapper, reader) = new(42);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     let display_str = format!("{}", guard);
     assert_eq!(display_str, "42");
@@ -115,7 +115,7 @@ fn test_guard_display() {
 #[test]
 fn test_guard_display_string() {
     let (_swapper, reader) = new(String::from("display_test"));
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     let display_str = format!("{}", guard);
     assert_eq!(display_str, "display_test");
@@ -126,7 +126,7 @@ fn test_guard_display_string() {
 #[test]
 fn test_guard_display_float() {
     let (_swapper, reader) = new(3.14);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     let display_str = format!("{}", guard);
     assert!(display_str.contains("3.14"));
@@ -138,9 +138,9 @@ fn test_guard_display_float() {
 fn test_multiple_guards_same_reader() {
     let (_swapper, reader) = new(100);
     
-    let guard1 = reader.read().unwrap();
-    let guard2 = reader.read().unwrap();
-    let guard3 = reader.read().unwrap();
+    let guard1 = reader.read();
+    let guard2 = reader.read();
+    let guard3 = reader.read();
     
     assert_eq!(*guard1, 100);
     assert_eq!(*guard2, 100);
@@ -154,13 +154,13 @@ fn test_guard_lifetime_scope() {
     let (_swapper, reader) = new(String::from("scope_test"));
     
     {
-        let guard = reader.read().unwrap();
+        let guard = reader.read();
         assert_eq!(*guard, "scope_test");
     } // guard dropped here
     
     // Reader should still work after guard is dropped
     // guard 被 drop 后，reader 仍应工作
-    let guard2 = reader.read().unwrap();
+    let guard2 = reader.read();
     assert_eq!(*guard2, "scope_test");
 }
 
@@ -171,11 +171,11 @@ fn test_guard_nested_scopes() {
     let (_swapper, reader) = new(vec![1, 2, 3]);
     
     {
-        let guard1 = reader.read().unwrap();
+        let guard1 = reader.read();
         assert_eq!(guard1.len(), 3);
         
         {
-            let guard2 = reader.read().unwrap();
+            let guard2 = reader.read();
             assert_eq!(guard2.len(), 3);
         }
         
@@ -191,14 +191,14 @@ fn test_guard_nested_scopes() {
 fn test_guard_explicit_drop() {
     let (_swapper, reader) = new(42);
     
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     assert_eq!(*guard, 42);
     
     drop(guard);
     
     // Reader should still work after explicit drop
     // 显式 drop 后，reader 仍应工作
-    let guard2 = reader.read().unwrap();
+    let guard2 = reader.read();
     assert_eq!(*guard2, 42);
 }
 
@@ -207,7 +207,7 @@ fn test_guard_explicit_drop() {
 #[test]
 fn test_guard_method_calls() {
     let (_swapper, reader) = new(String::from("method_test"));
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     // Should be able to call methods on the guarded value
     // 应该能够在受保护的值上调用方法
@@ -221,7 +221,7 @@ fn test_guard_method_calls() {
 #[test]
 fn test_guard_vector_operations() {
     let (_swapper, reader) = new(vec![10, 20, 30, 40, 50]);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     assert_eq!(guard.len(), 5);
     assert_eq!(guard.first(), Some(&10));
@@ -234,7 +234,7 @@ fn test_guard_vector_operations() {
 #[test]
 fn test_guard_comparison() {
     let (_swapper, reader) = new(42);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     assert_eq!(*guard, 42);
     assert_ne!(*guard, 41);
@@ -253,7 +253,7 @@ fn test_guard_custom_struct() {
     }
 
     let (_swapper, reader) = new(Point { x: 10, y: 20 });
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     assert_eq!(guard.x, 10);
     assert_eq!(guard.y, 20);
@@ -264,7 +264,7 @@ fn test_guard_custom_struct() {
 #[test]
 fn test_guard_tuple() {
     let (_swapper, reader) = new((42, String::from("test")));
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     assert_eq!(guard.0, 42);
     assert_eq!(guard.1, "test");
@@ -275,7 +275,7 @@ fn test_guard_tuple() {
 #[test]
 fn test_guard_option() {
     let (_swapper, reader) = new(Some(42));
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     assert_eq!(*guard, Some(42));
     assert!(guard.is_some());
@@ -287,7 +287,7 @@ fn test_guard_option() {
 #[test]
 fn test_guard_result() {
     let (_swapper, reader) = new(Ok::<i32, String>(42));
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     
     assert!(guard.is_ok());
     assert_eq!(guard.as_ref().unwrap(), &42);

@@ -12,11 +12,11 @@ fn test_reader_map_int() {
     let (mut swapper, reader) = new(10);
 
     let result = reader.map(|x| x * 2);
-    assert_eq!(result, Some(20));
+    assert_eq!(result, 20);
 
     swapper.update(5);
     let result = reader.map(|x| x + 100);
-    assert_eq!(result, Some(105));
+    assert_eq!(result, 105);
 }
 
 /// Test reader map operation with strings
@@ -26,11 +26,11 @@ fn test_reader_map_string() {
     let (mut swapper, reader) = new(String::from("hello"));
 
     let result = reader.map(|s| s.len());
-    assert_eq!(result, Some(5));
+    assert_eq!(result, 5);
 
     swapper.update(String::from("world!"));
     let result = reader.map(|s| s.to_uppercase());
-    assert_eq!(result, Some(String::from("WORLD!")));
+    assert_eq!(result, String::from("WORLD!"));
 }
 
 /// Test reader map operation with vectors
@@ -40,11 +40,11 @@ fn test_reader_map_vector() {
     let (mut swapper, reader) = new(vec![1, 2, 3]);
 
     let result = reader.map(|v| v.len());
-    assert_eq!(result, Some(3));
+    assert_eq!(result, 3);
 
     swapper.update(vec![1, 2, 3, 4, 5]);
     let result = reader.map(|v| v.iter().sum::<i32>());
-    assert_eq!(result, Some(15));
+    assert_eq!(result, 15);
 }
 
 /// Test reader filter operation
@@ -53,7 +53,7 @@ fn test_reader_map_vector() {
 fn test_reader_filter() {
     let (mut swapper, reader) = new(10);
 
-    let guard = reader.filter(|x| x > &5);
+    let guard = reader.filter(|x| *x > 5);
     assert!(guard.is_some());
     assert_eq!(*guard.unwrap(), 10);
 
@@ -92,47 +92,19 @@ fn test_reader_filter_vector() {
     assert!(guard.is_none());
 }
 
-/// Test reader try_clone_value operation
-/// 测试读取者 try_clone_value 操作
-#[test]
-fn test_reader_try_clone_value() {
-    let (mut swapper, reader) = new(String::from("hello"));
-
-    let cloned = reader.try_clone_value().unwrap();
-    assert_eq!(cloned, "hello");
-
-    swapper.update(String::from("world"));
-    let cloned = reader.try_clone_value().unwrap();
-    assert_eq!(cloned, "world");
-}
-
-/// Test reader try_clone_value with vectors
-/// 测试读取者 try_clone_value（向量）
-#[test]
-fn test_reader_try_clone_value_vector() {
-    let (mut swapper, reader) = new(vec![1, 2, 3]);
-
-    let cloned = reader.try_clone_value().unwrap();
-    assert_eq!(cloned, vec![1, 2, 3]);
-
-    swapper.update(vec![4, 5, 6]);
-    let cloned = reader.try_clone_value().unwrap();
-    assert_eq!(cloned, vec![4, 5, 6]);
-}
-
 /// Test writer update_and_fetch operation
 /// 测试写入者 update_and_fetch 操作
 #[test]
 fn test_writer_update_and_fetch() {
     let (mut swapper, reader) = new(10);
 
-    let guard = swapper.update_and_fetch(|x| x * 2).unwrap();
+    let guard = swapper.update_and_fetch(|x| x * 2);
     assert_eq!(*guard, 20);
-    assert_eq!(*reader.read().unwrap(), 20);
+    assert_eq!(*reader.read(), 20);
 
-    let guard = swapper.update_and_fetch(|x| x + 5).unwrap();
+    let guard = swapper.update_and_fetch(|x| x + 5);
     assert_eq!(*guard, 25);
-    assert_eq!(*reader.read().unwrap(), 25);
+    assert_eq!(*reader.read(), 25);
 }
 
 /// Test writer update_and_fetch with strings
@@ -141,13 +113,13 @@ fn test_writer_update_and_fetch() {
 fn test_writer_update_and_fetch_string() {
     let (mut swapper, reader) = new(String::from("hello"));
 
-    let guard = swapper.update_and_fetch(|s| s.to_uppercase()).unwrap();
+    let guard = swapper.update_and_fetch(|s| s.to_uppercase());
     assert_eq!(*guard, "HELLO");
-    assert_eq!(*reader.read().unwrap(), "HELLO");
+    assert_eq!(*reader.read(), "HELLO");
 
-    let guard = swapper.update_and_fetch(|s| format!("{} world", s)).unwrap();
+    let guard = swapper.update_and_fetch(|s| format!("{} world", s));
     assert_eq!(*guard, "HELLO world");
-    assert_eq!(*reader.read().unwrap(), "HELLO world");
+    assert_eq!(*reader.read(), "HELLO world");
 }
 
 /// Test writer update_and_fetch with vectors
@@ -160,9 +132,9 @@ fn test_writer_update_and_fetch_vector() {
         let mut new_v = v.clone();
         new_v.push(4);
         new_v
-    }).unwrap();
+    });
     assert_eq!(&*guard, &vec![1, 2, 3, 4]);
-    assert_eq!(&*reader.read().unwrap(), &vec![1, 2, 3, 4]);
+    assert_eq!(&*reader.read(), &vec![1, 2, 3, 4]);
 }
 
 /// Test writer read capability
@@ -171,13 +143,13 @@ fn test_writer_update_and_fetch_vector() {
 fn test_writer_read() {
     let (mut swapper, reader) = new(42);
 
-    let guard = swapper.read().unwrap();
+    let guard = swapper.read();
     assert_eq!(*guard, 42);
     drop(guard);
 
     swapper.update(100);
-    assert_eq!(*swapper.read().unwrap(), 100);
-    assert_eq!(*reader.read().unwrap(), 100);
+    assert_eq!(*swapper.read(), 100);
+    assert_eq!(*reader.read(), 100);
 }
 
 /// Test writer read with strings
@@ -186,13 +158,13 @@ fn test_writer_read() {
 fn test_writer_read_string() {
     let (mut swapper, reader) = new(String::from("test"));
 
-    let guard = swapper.read().unwrap();
+    let guard = swapper.read();
     assert_eq!(*guard, "test");
     drop(guard);
 
     swapper.update(String::from("updated"));
-    assert_eq!(*swapper.read().unwrap(), "updated");
-    assert_eq!(*reader.read().unwrap(), "updated");
+    assert_eq!(*swapper.read(), "updated");
+    assert_eq!(*reader.read(), "updated");
 }
 
 /// Test chained operations
@@ -201,18 +173,16 @@ fn test_writer_read_string() {
 fn test_chained_operations() {
     let (mut swapper, reader) = new(10);
 
-    // Chain: read -> map -> filter
-    // 链式：read -> map -> filter
-    let result = reader.read()
-        .map(|guard| *guard * 2)
-        .filter(|x| x > &15);
-    assert!(result.is_some());
+    // Chain: read -> filter -> map
+    // 链式：read -> filter -> map
+    let guard = reader.read();
+    let result = if *guard > 5 { *guard * 2 } else { 0 };
+    assert_eq!(result, 20);
 
     swapper.update(5);
-    let result = reader.read()
-        .map(|guard| *guard * 2)
-        .filter(|x| x > &15);
-    assert!(result.is_none());
+    let guard = reader.read();
+    let result = if *guard > 5 { *guard * 2 } else { 0 };
+    assert_eq!(result, 0); // Value is 5, which is not > 5
 }
 
 /// Test multiple operations on same guard
@@ -220,7 +190,7 @@ fn test_chained_operations() {
 #[test]
 fn test_multiple_operations_same_guard() {
     let (_swapper, reader) = new(vec![1, 2, 3, 4, 5]);
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
 
     // Multiple operations on the same guard
     // 在同一 guard 上的多个操作
@@ -242,11 +212,11 @@ fn test_map_complex_transformation() {
             .map(|x| x * 2)
             .sum::<i32>()
     });
-    assert_eq!(result, Some(12)); // (2*2 + 4*2) = 12
+    assert_eq!(result, 12); // (2*2 + 4*2) = 12
 
     swapper.update(vec![10, 20, 30]);
     let result = reader.map(|v| v.iter().sum::<i32>());
-    assert_eq!(result, Some(60));
+    assert_eq!(result, 60);
 }
 
 /// Test filter with complex condition
@@ -279,21 +249,27 @@ fn test_update_and_fetch_side_effects() {
         let mut new_v = v.clone();
         new_v.push(4);
         new_v
-    }).unwrap();
+    });
 
     assert_eq!(call_count, 1);
     assert_eq!(&*guard, &vec![1, 2, 3, 4]);
-    assert_eq!(&*reader.read().unwrap(), &vec![1, 2, 3, 4]);
+    assert_eq!(&*reader.read(), &vec![1, 2, 3, 4]);
 }
 
 /// Test map returns None for empty option
 /// 测试 map 对空 option 返回 None
 #[test]
 fn test_map_with_none_value() {
-    let (_swapper, reader) = new(None::<i32>);
-
+    let (mut swapper, reader) = new(Some(42));
+    
+    // Map on Some value
     let result = reader.map(|opt| opt.unwrap_or(0));
-    assert_eq!(result, Some(0));
+    assert_eq!(result, 42);
+    
+    // Map on None (after update)
+    swapper.update(None::<i32>);
+    let result = reader.map(|opt| opt.unwrap_or(0));
+    assert_eq!(result, 0);
 }
 
 /// Test filter with always-true condition

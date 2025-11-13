@@ -26,16 +26,15 @@ fn test_concurrent_stress() {
             let reader_clone = reader.clone();
             s.spawn(move || {
                 for _ in 0..10000 {
-                    if let Some(guard) = reader_clone.read() {
-                        let val = **guard;
-                        assert!(val <= num_updates, "Read invalid value: {}", val);
-                    }
+                    let guard = reader_clone.read();
+                    let val = **guard;
+                    assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
         }
     });
 
-    assert_eq!(**reader.read().unwrap(), num_updates);
+    assert_eq!(**reader.read(), num_updates);
 }
 
 /// Test concurrent readers with multiple updates
@@ -57,10 +56,9 @@ fn test_concurrent_multiple_readers() {
             let reader_clone = reader.clone();
             s.spawn(move || {
                 for _ in 0..1000 {
-                    if let Some(guard) = reader_clone.read() {
-                        let val = *guard;
-                        assert!(val <= num_updates, "Read invalid value: {}", val);
-                    }
+                    let guard = reader_clone.read();
+                    let val = *guard;
+                    assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
         }
@@ -92,8 +90,7 @@ fn test_drop_behavior_and_none() {
     let h_reader2 = thread::spawn(move || {
         b3.wait();
         let guard = reader_clone.read();
-        assert!(guard.is_some());
-        assert_eq!(*guard.unwrap(), 10);
+        assert_eq!(*guard, 10);
         drop(reader_clone);
     });
 
@@ -114,12 +111,8 @@ fn test_drop_behavior_and_none() {
 
         s.spawn(move || {
             for _ in 0..1000 {
-                if let Some(guard) = reader.read() {
-                    assert_eq!(*guard, 10);
-                } else {
-                    assert!(reader.read().is_none());
-                    break;
-                }
+                let guard = reader.read();
+                assert_eq!(*guard, 10);
             }
         });
     });
@@ -149,11 +142,9 @@ fn test_concurrent_readers_with_held_guards() {
                 thread::sleep(std::time::Duration::from_millis(5));
                 let guard2 = reader_clone.read();
                 
-                if let (Some(g1), Some(g2)) = (guard1, guard2) {
-                    // Both guards should be valid
-                    // 两个 guard 都应该有效
-                    let _ = (*g1, *g2);
-                }
+                // Both guards should be valid
+                // 两个 guard 都应该有效
+                let _ = (*guard1, *guard2);
             });
         }
     });
@@ -176,13 +167,12 @@ fn test_reader_holds_guard_during_updates() {
         s.spawn(move || {
             // Hold a guard for a while
             // 持有 guard 一段时间
-            if let Some(guard) = reader.read() {
-                let initial_value = *guard;
-                thread::sleep(std::time::Duration::from_millis(10));
-                // Guard should still be valid even after updates
-                // 即使在更新后，guard 仍应有效
-                assert_eq!(*guard, initial_value);
-            }
+            let guard = reader.read();
+            let initial_value = *guard;
+            thread::sleep(std::time::Duration::from_millis(10));
+            // Guard should still be valid even after updates
+            // 即使在更新后，guard 仍应有效
+            assert_eq!(*guard, initial_value);
         });
     });
 }
@@ -206,16 +196,15 @@ fn test_many_concurrent_readers_frequent_updates() {
             let reader_clone = reader.clone();
             s.spawn(move || {
                 for _ in 0..5000 {
-                    if let Some(guard) = reader_clone.read() {
-                        let val = *guard;
-                        assert!(val <= num_updates, "Read invalid value: {}", val);
-                    }
+                    let guard = reader_clone.read();
+                    let val = *guard;
+                    assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
         }
     });
 
-    assert_eq!(*reader.read().unwrap(), num_updates);
+    assert_eq!(*reader.read(), num_updates);
 }
 
 /// Test rapid reader creation and cloning
@@ -236,9 +225,8 @@ fn test_rapid_reader_creation() {
             let reader_clone = reader.clone();
             s.spawn(move || {
                 for _ in 0..1000 {
-                    if let Some(guard) = reader_clone.read() {
-                        let _ = *guard;
-                    }
+                    let guard = reader_clone.read();
+                    let _ = *guard;
                 }
             });
         }
@@ -263,13 +251,12 @@ fn test_reader_consistency_concurrent_updates() {
             let reader_clone = reader.clone();
             s.spawn(move || {
                 for _ in 0..1000 {
-                    if let Some(guard) = reader_clone.read() {
-                        // Each read should return a valid vector with a single element
-                        // 每次读取都应返回一个有效的向量，包含单个元素
-                        assert_eq!(guard.len(), 1);
-                        let val = guard[0];
-                        assert!(val <= num_updates, "Read invalid value: {}", val);
-                    }
+                    // Each read should return a valid vector with a single element
+                    // 每次读取都应返回一个有效的向量，包含单个元素
+                    let guard = reader_clone.read();
+                    assert_eq!(guard.len(), 1);
+                    let val = guard[0];
+                    assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
         }
@@ -298,9 +285,8 @@ fn test_synchronization_with_barrier() {
             s.spawn(move || {
                 b.wait();
                 for _ in 0..1000 {
-                    if let Some(guard) = reader_clone.read() {
-                        let _ = *guard;
-                    }
+                    let guard = reader_clone.read();
+                    let _ = *guard;
                 }
             });
         }

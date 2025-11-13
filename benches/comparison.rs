@@ -1,5 +1,5 @@
 use arc_swap::ArcSwap;
-use criterion::{ criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 use smr_swap;
 use std::sync::Arc;
 use std::thread;
@@ -16,7 +16,7 @@ fn bench_single_thread_read(c: &mut Criterion) {
     group.bench_function("smr_swap", |b| {
         let (_swapper, reader) = smr_swap::new(vec![1; 1000]);
         b.iter(|| {
-            let guard = reader.read().unwrap();
+            let guard = reader.read();
             black_box(&*guard);
         });
     });
@@ -86,7 +86,7 @@ fn bench_multi_thread_read(c: &mut Criterion) {
                             let reader_clone = reader.clone();
                             s.spawn(move || {
                                 for _ in 0..iters {
-                                    let guard = reader_clone.read().unwrap();
+                                    let guard = reader_clone.read();
                                     black_box(&*guard);
                                 }
                             });
@@ -157,7 +157,7 @@ fn bench_mixed_read_write(c: &mut Criterion) {
                             let reader_clone = reader.clone();
                             s.spawn(move || {
                                 for _ in 0..iters {
-                                    let guard = reader_clone.read().unwrap();
+                                    let guard = reader_clone.read();
                                     black_box(&*guard);
                                 }
                             });
@@ -224,7 +224,7 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
                 let reader_clone = reader.clone();
                 s.spawn(move || {
                     // 读取者持有守卫
-                    let _guard = reader_clone.read().unwrap();
+                    let _guard = reader_clone.read();
                     // 模拟长时间持有
                     std::thread::sleep(std::time::Duration::from_micros(10));
                 });
@@ -285,7 +285,7 @@ fn bench_batch_read(c: &mut Criterion) {
                     s.spawn(move || {
                         for _ in 0..iters {
                             // 批量读取：一个 pin 内多次读取
-                            let guard = reader_clone.read().unwrap();
+                            let guard = reader_clone.read();
                             for _ in 0..10 {
                                 black_box(&*guard);
                             }
@@ -347,7 +347,7 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
                 let reader_clone = reader.clone();
                 s.spawn(move || {
                     for _ in 0..iters {
-                        let guard = reader_clone.read().unwrap();
+                        let guard = reader_clone.read();
                         black_box(&*guard);
                     }
                 });

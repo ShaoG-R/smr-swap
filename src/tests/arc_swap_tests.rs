@@ -11,9 +11,9 @@ use std::sync::Arc;
 fn test_arc_swap_basic_int() {
     let (mut swapper, reader) = new(Arc::new(42));
     
-    let old_value = swapper.swap(Arc::new(100)).unwrap();
+    let old_value = swapper.swap(Arc::new(100));
     assert_eq!(*old_value, 42);
-    assert_eq!(**reader.read().unwrap(), 100);
+    assert_eq!(**reader.read(), 100);
 }
 
 /// Test basic swap operation with Arc-wrapped strings
@@ -22,9 +22,9 @@ fn test_arc_swap_basic_int() {
 fn test_arc_swap_basic_string() {
     let (mut swapper, reader) = new(Arc::new(String::from("hello")));
     
-    let old_value = swapper.swap(Arc::new(String::from("world"))).unwrap();
+    let old_value = swapper.swap(Arc::new(String::from("world")));
     assert_eq!(*old_value, "hello");
-    assert_eq!(**reader.read().unwrap(), "world");
+    assert_eq!(**reader.read(), "world");
 }
 
 /// Test basic swap operation with Arc-wrapped vectors
@@ -33,9 +33,9 @@ fn test_arc_swap_basic_string() {
 fn test_arc_swap_basic_vector() {
     let (mut swapper, reader) = new(Arc::new(vec![1, 2, 3]));
     
-    let old_value = swapper.swap(Arc::new(vec![4, 5, 6])).unwrap();
+    let old_value = swapper.swap(Arc::new(vec![4, 5, 6]));
     assert_eq!(*old_value, vec![1, 2, 3]);
-    assert_eq!(**reader.read().unwrap(), vec![4, 5, 6]);
+    assert_eq!(**reader.read(), vec![4, 5, 6]);
 }
 
 /// Test multiple sequential swaps
@@ -45,9 +45,9 @@ fn test_arc_multiple_swaps() {
     let (mut swapper, reader) = new(Arc::new(0));
     
     for i in 1..=10 {
-        let old = swapper.swap(Arc::new(i)).unwrap();
+        let old = swapper.swap(Arc::new(i));
         assert_eq!(*old, i - 1);
-        assert_eq!(**reader.read().unwrap(), i);
+        assert_eq!(**reader.read(), i);
     }
 }
 
@@ -57,7 +57,7 @@ fn test_arc_multiple_swaps() {
 fn test_arc_swap_returns_old_value() {
     let (mut swapper, _reader) = new(Arc::new(String::from("original")));
     
-    let old_arc = swapper.swap(Arc::new(String::from("new"))).unwrap();
+    let old_arc = swapper.swap(Arc::new(String::from("new")));
     
     // Verify we got the old Arc
     // 验证我们得到了旧的 Arc
@@ -75,7 +75,7 @@ fn test_arc_swap_returns_old_value() {
 fn test_arc_swap_reference_counting() {
     let (mut swapper, _reader) = new(Arc::new(vec![1, 2, 3]));
     
-    let old_arc = swapper.swap(Arc::new(vec![4, 5, 6])).unwrap();
+    let old_arc = swapper.swap(Arc::new(vec![4, 5, 6]));
     
     // Arc may have reference count > 1 due to deferred destruction in SMR
     // Arc 可能有 > 1 的引用计数，因为 SMR 中的延迟回收
@@ -95,9 +95,9 @@ fn test_arc_swap_reference_counting() {
 fn test_arc_update_and_fetch_arc_basic() {
     let (mut swapper, reader) = new(Arc::new(10));
     
-    let result = swapper.update_and_fetch_arc(|x| Arc::new(**x * 2)).unwrap();
+    let result = swapper.update_and_fetch_arc(|x| Arc::new(**x * 2));
     assert_eq!(*result, 20);
-    assert_eq!(**reader.read().unwrap(), 20);
+    assert_eq!(**reader.read(), 20);
 }
 
 /// Test update_and_fetch_arc with strings
@@ -106,9 +106,9 @@ fn test_arc_update_and_fetch_arc_basic() {
 fn test_arc_update_and_fetch_arc_string() {
     let (mut swapper, reader) = new(Arc::new(String::from("hello")));
     
-    let result = swapper.update_and_fetch_arc(|s| Arc::new(s.to_uppercase())).unwrap();
+    let result = swapper.update_and_fetch_arc(|s| Arc::new(s.to_uppercase()));
     assert_eq!(*result, "HELLO");
-    assert_eq!(**reader.read().unwrap(), "HELLO");
+    assert_eq!(**reader.read(), "HELLO");
 }
 
 /// Test update_and_fetch_arc with vectors
@@ -121,10 +121,10 @@ fn test_arc_update_and_fetch_arc_vector() {
         let mut new_v = (**v).clone();
         new_v.push(4);
         Arc::new(new_v)
-    }).unwrap();
+    });
     
     assert_eq!(*result, vec![1, 2, 3, 4]);
-    assert_eq!(**reader.read().unwrap(), vec![1, 2, 3, 4]);
+    assert_eq!(**reader.read(), vec![1, 2, 3, 4]);
 }
 
 /// Test update_and_fetch_arc multiple times
@@ -134,10 +134,10 @@ fn test_arc_update_and_fetch_arc_multiple() {
     let (mut swapper, reader) = new(Arc::new(0));
     
     for i in 1..=5 {
-        let result = swapper.update_and_fetch_arc(|x| Arc::new(**x + i)).unwrap();
+        let result = swapper.update_and_fetch_arc(|x| Arc::new(**x + i));
         let expected = (1..=i).sum::<i32>();
         assert_eq!(*result, expected);
-        assert_eq!(**reader.read().unwrap(), expected);
+        assert_eq!(**reader.read(), expected);
     }
 }
 
@@ -147,7 +147,7 @@ fn test_arc_update_and_fetch_arc_multiple() {
 fn test_arc_update_and_fetch_arc_returns_arc() {
     let (mut swapper, _reader) = new(Arc::new(String::from("test")));
     
-    let result_arc = swapper.update_and_fetch_arc(|s| Arc::new(format!("{}_updated", s))).unwrap();
+    let result_arc = swapper.update_and_fetch_arc(|s| Arc::new(format!("{}_updated", s)));
     
     // Result should be an Arc that we can clone
     // 结果应该是一个我们可以克隆的 Arc
@@ -166,12 +166,12 @@ fn test_arc_swap_shared_across_readers() {
     let (mut swapper, reader1) = new(Arc::new(String::from("v1")));
     let reader2 = reader1.clone();
     
-    let old = swapper.swap(Arc::new(String::from("v2"))).unwrap();
+    let old = swapper.swap(Arc::new(String::from("v2")));
     
     // Both readers should see the new value
     // 两个读取者都应该看到新值
-    assert_eq!(**reader1.read().unwrap(), "v2");
-    assert_eq!(**reader2.read().unwrap(), "v2");
+    assert_eq!(**reader1.read(), "v2");
+    assert_eq!(**reader2.read(), "v2");
     
     // Old Arc is still valid
     // 旧的 Arc 仍然有效
@@ -189,12 +189,12 @@ fn test_arc_update_and_fetch_arc_shared() {
         let mut new_v = (**v).clone();
         new_v.push(4);
         Arc::new(new_v)
-    }).unwrap();
+    });
     
     // All readers should see the updated value
     // 所有读取者都应该看到更新后的值
-    assert_eq!(**reader1.read().unwrap(), vec![1, 2, 3, 4]);
-    assert_eq!(**reader2.read().unwrap(), vec![1, 2, 3, 4]);
+    assert_eq!(**reader1.read(), vec![1, 2, 3, 4]);
+    assert_eq!(**reader2.read(), vec![1, 2, 3, 4]);
     assert_eq!(*result, vec![1, 2, 3, 4]);
 }
 
@@ -219,12 +219,12 @@ fn test_arc_swap_complex_struct() {
         id: 2,
         name: String::from("second"),
         values: vec![4, 5, 6],
-    })).unwrap();
+    }));
     
     assert_eq!(old.id, 1);
     assert_eq!(old.name, "first");
     
-    let current = reader.read().unwrap();
+    let current = reader.read();
     assert_eq!(current.id, 2);
     assert_eq!(current.name, "second");
 }
@@ -247,12 +247,12 @@ fn test_arc_update_and_fetch_arc_complex_struct() {
     let result = swapper.update_and_fetch_arc(|c| Arc::new(Counter {
         count: c.count + 1,
         label: format!("{}_incremented", c.label),
-    })).unwrap();
+    }));
     
     assert_eq!(result.count, 1);
     assert_eq!(result.label, "initial_incremented");
     
-    let current = reader.read().unwrap();
+    let current = reader.read();
     assert_eq!(current.count, 1);
     assert_eq!(current.label, "initial_incremented");
 }
@@ -264,24 +264,24 @@ fn test_arc_swap_and_update_interleaved() {
     let (mut swapper, reader) = new(Arc::new(0));
     
     // First swap
-    let old1 = swapper.swap(Arc::new(10)).unwrap();
+    let old1 = swapper.swap(Arc::new(10));
     assert_eq!(*old1, 0);
-    assert_eq!(**reader.read().unwrap(), 10);
+    assert_eq!(**reader.read(), 10);
     
     // Then update_and_fetch_arc
-    let result1 = swapper.update_and_fetch_arc(|x| Arc::new(**x * 2)).unwrap();
+    let result1 = swapper.update_and_fetch_arc(|x| Arc::new(**x * 2));
     assert_eq!(*result1, 20);
-    assert_eq!(**reader.read().unwrap(), 20);
+    assert_eq!(**reader.read(), 20);
     
     // Another swap
-    let old2 = swapper.swap(Arc::new(100)).unwrap();
+    let old2 = swapper.swap(Arc::new(100));
     assert_eq!(*old2, 20);
-    assert_eq!(**reader.read().unwrap(), 100);
+    assert_eq!(**reader.read(), 100);
     
     // Another update_and_fetch_arc
-    let result2 = swapper.update_and_fetch_arc(|x| Arc::new(**x + 50)).unwrap();
+    let result2 = swapper.update_and_fetch_arc(|x| Arc::new(**x + 50));
     assert_eq!(*result2, 150);
-    assert_eq!(**reader.read().unwrap(), 150);
+    assert_eq!(**reader.read(), 150);
 }
 
 /// Test Arc swap with nested Arc
@@ -290,10 +290,10 @@ fn test_arc_swap_and_update_interleaved() {
 fn test_arc_swap_nested_arc() {
     let (mut swapper, reader) = new(Arc::new(Arc::new(String::from("nested"))));
     
-    let old = swapper.swap(Arc::new(Arc::new(String::from("new_nested")))).unwrap();
+    let old = swapper.swap(Arc::new(Arc::new(String::from("new_nested"))));
     
     assert_eq!(**old, "nested");
-    assert_eq!(***reader.read().unwrap(), "new_nested");
+    assert_eq!(***reader.read(), "new_nested");
 }
 
 /// Test update_and_fetch_arc with side effects
@@ -308,9 +308,9 @@ fn test_arc_update_and_fetch_arc_side_effects() {
         let mut new_v = (**v).clone();
         new_v.push(4);
         Arc::new(new_v)
-    }).unwrap();
+    });
     
     assert_eq!(call_count, 1);
     assert_eq!(*result, vec![1, 2, 3, 4]);
-    assert_eq!(**reader.read().unwrap(), vec![1, 2, 3, 4]);
+    assert_eq!(**reader.read(), vec![1, 2, 3, 4]);
 }

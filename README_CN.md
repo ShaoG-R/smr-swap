@@ -25,7 +25,7 @@
 
 ```toml
 [dependencies]
-smr-swap = "0.1"
+smr-swap = "0.2"
 ```
 
 ### 基本用法
@@ -44,7 +44,7 @@ fn main() {
     writer.update(vec![4, 5, 6]);
 
     // 读取者看到新值
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     println!("{:?}", *guard); // [4, 5, 6]
 }
 ```
@@ -62,7 +62,7 @@ fn main() {
     
     writer.update(Arc::new(vec![4, 5, 6]));
     
-    let guard = reader.read().unwrap();
+    let guard = reader.read();
     println!("{:?}", *guard); // Arc<Vec<i32>>
 }
 ```
@@ -81,7 +81,7 @@ let (swapper, reader) = smr_swap::new(initial_value);
 - `Swapper<T>`: 写入者（不可 `Clone`，强制单写）
 - `SwapReader<T>`: 读取者（可克隆以支持多个读取者）
 
-### 写入者操作
+### 写入者操作 (Swapper<T>)
 
 #### `update(new_value: T)`
 原子地替换当前值。
@@ -90,31 +90,48 @@ let (swapper, reader) = smr_swap::new(initial_value);
 writer.update(new_value);
 ```
 
-#### `read() -> Option<SwapGuard<T>>`
-允许写入者读取当前值。
+#### `read() -> SwapGuard<T>`
+获取当前值的只读引用（通过 SwapGuard）。
 
 ```rust
-if let Some(guard) = writer.read() {
+let guard = writer.read();
+println!("当前值: {:?}", *guard);
+```
+
+#### `read_with_guard<F, R>(f: F) -> R where F: FnOnce(&SwapGuard<T>) -> R`
+使用 guard 执行闭包，允许在同一个 pinned 版本上执行多个操作。
+
+```rust
+let len = writer.read_with_guard(|guard| {
     println!("当前值: {:?}", *guard);
-}
+    // 使用同一个 guard 执行多个操作
+    (*guard).len()
+});
 ```
 
-#### `update_and_fetch<F>(f: F) -> Option<SwapGuard<T>>`
-基于当前值进行更新并返回新值。
+#### `map<F, U>(&self, f: F) -> U where F: FnOnce(&T) -> U`
+对当前值应用闭包并返回结果。
 
 ```rust
-let new_guard = writer.update_and_fetch(|old| {
-    let mut v = old.clone();
-    v.push(999);
-    v
-})?;
+let len = writer.map(|v| v.len());
 ```
 
-### Arc 专用的写入者操作
+#### `update_and_fetch<F>(&mut self, f: F) -> SwapGuard<T> where F: FnOnce(&T) -> T`
+使用提供的闭包原子地更新值，并返回新值的 guard。
 
-以下方法仅在 `T` 被 `Arc` 包装时可用（即 `Swapper<Arc<T>>`）：
+```rust
+let guard = writer.update_and_fetch(|v| {
+    let mut new_v = v.clone();
+    new_v.push(42);
+    new_v
+});
+```
 
-#### `swap(new_value: Arc<T>) -> Option<Arc<T>>`
+### Arc 专用的写入者操作 (Swapper<Arc<T>>)
+
+以下方法仅在 `T` 被 `Arc` 包装时可用：
+
+#### `swap(&mut self, new_value: Arc<T>) -> Arc<T>`
 原子地替换当前 `Arc` 包装的值并返回旧的 `Arc`。
 
 ```rust
@@ -122,13 +139,11 @@ use std::sync::Arc;
 
 let (mut writer, _) = smr_swap::new(Arc::new(42));
 
-// 交换值并获取旧值
-if let Some(old) = writer.swap(Arc::new(43)) {
-    println!("旧值: {:?}", *old); // 42
-}
+let old = writer.swap(Arc::new(43));
+println!("旧值: {:?}", *old); // 42
 ```
 
-#### `update_and_fetch_arc<F>(f: F) -> Option<Arc<T>>`
+#### `update_and_fetch_arc<F>(&mut self, f: F) -> Arc<T> where F: FnOnce(&Arc<T>) -> Arc<T>`
 使用接收当前 `Arc` 并返回新 `Arc` 的闭包来更新值。
 
 ```rust
@@ -136,49 +151,47 @@ use std::sync::Arc;
 
 let (mut writer, _) = smr_swap::new(Arc::new(vec![1, 2, 3]));
 
-// 通过添加元素来更新向量
-if let Some(new_arc) = writer.update_and_fetch_arc(|current| {
-    let mut vec = current.to_vec();
+let new_arc = writer.update_and_fetch_arc(|current| {
+    let mut vec = (**current).clone();
     vec.push(4);
     Arc::new(vec)
-}) {
-    println!("新值: {:?}", *new_arc); // [1, 2, 3, 4]
-}
+});
+println!("新值: {:?}", *new_arc); // [1, 2, 3, 4]
 ```
 
-### 读取者操作
+### 读取者操作 (SwapReader<T>)
 
-#### `read() -> Option<SwapGuard<T>>`
-读取当前值，返回一个守卫以确保在持有期间值不会被回收。
+#### `read() -> SwapGuard<T>`
+获取当前值的只读引用（通过 SwapGuard）。
 
 ```rust
-if let Some(guard) = reader.read() {
-    println!("值: {:?}", *guard);
-}
+let guard = reader.read();
+println!("当前值: {:?}", *guard);
 ```
 
-#### `map<F, R>(f: F) -> Option<R>`
-对当前值应用闭包，无需持有守卫。
+#### `read_with_guard<F, R>(&self, f: F) -> R where F: FnOnce(&SwapGuard<T>) -> R`
+使用 guard 执行闭包，允许在同一个 pinned 版本上执行多个操作。
 
 ```rust
-let doubled = reader.map(|v| v * 2);
+let len = reader.read_with_guard(|guard| {
+    println!("当前值: {:?}", *guard);
+    (*guard).len()
+});
 ```
 
-#### `filter<F>(f: F) -> Option<SwapGuard<T>>`
+#### `map<F, U>(&self, f: F) -> U where F: FnOnce(&T) -> U`
+对当前值应用闭包并返回结果。
+
+```rust
+let len = reader.map(|v| v.len());
+```
+
+#### `filter<F>(&self, f: F) -> Option<SwapGuard<T>> where F: FnOnce(&T) -> bool`
 仅当谓词为真时返回守卫。
 
 ```rust
-if let Some(guard) = reader.filter(|v| v > &10) {
-    println!("值 > 10: {:?}", *guard);
-}
-```
-
-#### `try_clone_value() -> Option<T>` (需要 `T: Clone`)
-克隆当前值。
-
-```rust
-if let Some(cloned) = reader.try_clone_value() {
-    println!("克隆值: {:?}", cloned);
+if let Some(guard) = reader.filter(|v| !v.is_empty()) {
+    println!("非空: {:?}", *guard);
 }
 ```
 
