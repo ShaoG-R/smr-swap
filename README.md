@@ -188,16 +188,17 @@ Comprehensive benchmark results comparing SMR-Swap against `arc-swap` on modern 
 
 | Scenario | SMR-Swap | ArcSwap | Improvement | Notes |
 |----------|----------|---------|-------------|-------|
-| Single-Thread Read | 5.47 ns | 8.98 ns | **39% faster** | Pure read performance |
-| Single-Thread Write | 148.51 ns | 129.37 ns | 15% slower | Epoch management overhead |
-| Multi-Thread Read (2) | 6.90 ns | 9.02 ns | **23% faster** | No contention |
-| Multi-Thread Read (4) | 9.13 ns | 9.26 ns | **1% faster** | Consistent scaling |
-| Multi-Thread Read (8) | 14.36 ns | 9.67 ns | 48% slower | Epoch coordination cost |
-| Mixed R/W (2 readers) | 151.23 ns | 456.36 ns | **67% faster** | 1 writer + 2 readers |
-| Mixed R/W (4 readers) | 152.27 ns | 452.69 ns | **66% faster** | 1 writer + 4 readers |
-| Mixed R/W (8 readers) | 156.02 ns | 493.48 ns | **68% faster** | 1 writer + 8 readers |
-| Batch Read (10x) | 9.89 ns | 10.14 ns | **2% faster** | Single pin, multiple reads |
-| Read with Held Guard | 140.31 ns | 481.23 ns | **71% faster** | Reader holds guard during write |
+| Single-Thread Read | 1.80 ns | 9.19 ns | **80% faster** | Pure read performance |
+| Single-Thread Write | 137.13 ns | 129.20 ns | 6% slower | Epoch management overhead |
+| Multi-Thread Read (2) | 1.82 ns | 9.29 ns | **80% faster** | No contention |
+| Multi-Thread Read (4) | 1.85 ns | 9.25 ns | **80% faster** | Consistent scaling |
+| Multi-Thread Read (8) | 2.05 ns (avg) | 9.38 ns | **78% faster** | Excellent scaling |
+| Mixed R/W (2 readers) | 138.69 ns | 452.64 ns | **69% faster** | 1 writer + 2 readers |
+| Mixed R/W (4 readers) | 139.54 ns | 455.19 ns | **69% faster** | 1 writer + 4 readers |
+| Mixed R/W (8 readers) | 140.08 ns | 534.12 ns | **74% faster** | 1 writer + 8 readers |
+| Batch Read | 2.53 ns | 9.67 ns | **74% faster** | Optimized batch reads |
+| Read with Held Guard | 137.27 ns | 524.49 ns | **74% faster** | Reader holds guard during write |
+| Read Under Memory Pressure | 860.54 ns | 1.18 μs | **27% faster** | Under memory pressure |
 
 ### Detailed Performance Analysis
 

@@ -12,7 +12,7 @@ keywords = ["lock-free", "concurrent", "memory-reclamation", "epoch", "swap"]
 categories = ["concurrency", "data-structures"]
 
 [dependencies]
-crossbeam-epoch = "0.9.18"
+swmr-epoch = "0.2.1"
 
 [dev-dependencies]
 arc-swap = "1.7"

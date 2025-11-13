@@ -158,6 +158,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -403,7 +412,16 @@ version = "0.1.2"
 dependencies = [
  "arc-swap",
  "criterion",
- "crossbeam-epoch",
+ "swmr-epoch",
+]
+
+[[package]]
+name = "swmr-epoch"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7139b88dfb057d031717ce26135424a9b90bc0ccab8a6aa94dddebdb4417a3d1"
+dependencies = [
+ "crossbeam-queue",
 ]
 
 [[package]]

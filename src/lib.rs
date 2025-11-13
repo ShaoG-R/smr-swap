@@ -1,6 +1,5 @@
-use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
+use swmr_epoch::{Atomic, Guard, Writer, ReaderRegistry};
 use std::ops::Deref;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 /// Internal shared state
@@ -10,6 +9,9 @@ pub struct SwapState<T> {
     // Current version pointer, the version seen by readers
     // 当前版本指针，读取者看到的版本
     pub(crate) current: Atomic<T>,
+    // Reader registry for pinning
+    // 用于钉住的读取者注册表
+    pub(crate) reader_registry: ReaderRegistry,
 }
 
 /// Writer type, not cloneable
@@ -17,6 +19,9 @@ pub struct SwapState<T> {
 /// 写入者类型，不可Clone
 pub struct Swapper<T> {
     inner: Arc<SwapState<T>>,
+    // Writer for garbage collection, held directly by Swapper
+    // 用于垃圾回收的写入者，由 Swapper 直接持有
+    writer: Writer,
 }
 
 /// Reader type, cloneable
@@ -30,49 +35,43 @@ pub struct SwapReader<T> {
 /// Create a new SMR container, returning a (Swapper, SwapReader) tuple
 ///
 /// 创建新的SMR容器，返回(Swapper, SwapReader)元组
-pub fn new<T>(initial: T) -> (Swapper<T>, SwapReader<T>) {
-    // Fix 1: Must use pin() to safely register the initial value
-    // 修复 1: 必须使用 pin() 来安全地注册初始值
-    let guard = &epoch::pin();
-    let owned = Owned::new(initial);
-    let shared = owned.into_shared(guard);
+pub fn new<T: Send + 'static>(initial: T) -> (Swapper<T>, SwapReader<T>) {
+    // Create the SWMR epoch system
+    // 创建 SWMR 纪元系统
+    let (writer, reader_registry) = swmr_epoch::new();
 
     let inner = Arc::new(SwapState {
-        current: Atomic::from(shared),
+        current: Atomic::new(initial),
+        reader_registry: reader_registry.clone(),
     });
 
-    let writer = Swapper {
+    let swapper = Swapper {
         inner: inner.clone(),
+        writer,
     };
 
     let reader = SwapReader { inner };
 
-    (writer, reader)
+    (swapper, reader)
 }
 
 
-impl<T> Swapper<T> {
+impl<T: Send + 'static> Swapper<T> {
     /// Perform a write operation to update the current version
     ///
     /// 执行写入操作，更新当前版本
     pub fn update(&mut self, new_value: T) {
-        // Must use pin() to safely perform defer_destroy
-        // 必须使用 pin() 来安全地进行 defer_destroy
-        let guard = &epoch::pin();
-        let new_owned = Owned::new(new_value);
-        let new_shared = new_owned.into_shared(guard);
-
-        // Atomically swap the pointer
-        // 原子地切换指针
-        let old = self.inner.current.swap(new_shared, Ordering::Release, guard);
-
-        // Defer destruction of the old version
-        // 延迟回收旧版本
-        // SAFETY: `guard` is obtained via pin() and is valid
-        // SAFETY: `guard` 是通过 pin() 获取的，是有效的
-        unsafe {
-            guard.defer_destroy(old);
-        }
+        // Create a new boxed value
+        // 创建新的装箱值
+        let new_boxed = Box::new(new_value);
+        
+        // Store the new value and retire the old one
+        // 存储新值并退休旧值
+        self.inner.current.store(new_boxed, &mut self.writer);
+        
+        // Try to reclaim garbage
+        // 尝试回收垃圾
+        self.writer.try_reclaim();
     }
 
     /// Get a read-only reference to the current value (via SwapGuard)
@@ -83,20 +82,13 @@ impl<T> Swapper<T> {
     ///
     /// 这是一个便利方法，允许写入者也能读取当前值
     pub fn read(&self) -> Option<SwapGuard<T>> {
-        let guard = epoch::pin();
-        let current = self.inner.current.load(Ordering::Acquire, &guard);
-
-        if current.is_null() {
-            return None;
-        }
-
-        let value = unsafe {
-            current.as_ref().unwrap() as *const T
-        };
+        let guard = self.inner.reader_registry.pin();
+        let value_ref = self.inner.current.load(&guard);
+        let value_ptr = value_ref as *const T;
 
         Some(SwapGuard {
             _guard: guard,
-            value,
+            value: value_ptr,
         })
     }
 
@@ -124,7 +116,7 @@ impl<T> Swapper<T> {
     }
 }
 
-impl<T> Swapper<Arc<T>> {
+impl<T: Send + Sync + 'static> Swapper<Arc<T>> {
     /// Atomically swap the current Arc value with a new one
     ///
     /// This method replaces the current Arc-wrapped value with a new one and returns the old value.
@@ -135,36 +127,25 @@ impl<T> Swapper<Arc<T>> {
     /// 这个方法用新的 Arc 包装值替换当前值，并返回旧值
     /// 如果容器已被销毁，返回 None
     pub fn swap(&mut self, new_value: Arc<T>) -> Option<Arc<T>> {
-        // Must use pin() to safely perform defer_destroy
-        // 必须使用 pin() 来安全地进行 defer_destroy
-        let guard = &epoch::pin();
-
-        let new_owned = Owned::new(new_value);
-        let new_shared = new_owned.into_shared(guard);
-
-        // Atomically swap the pointer
-        // 原子地切换指针
-        let old_shared = self.inner.current.swap(new_shared, Ordering::Release, guard);
-
-        if old_shared.is_null() {
-            return None;
-        }
-
-        unsafe {
-            // SAFETY:
-            // - We checked that old_shared is not null
-            // - guard ensures the epoch does not advance and the version is not reclaimed
-            // SAFETY:
-            // - 我们检查了 old_shared 不为 null
-            // - guard 确保 epoch 不会推进，版本不会被回收
-            let old_owned = old_shared.deref().clone();
-
-            // Defer destruction of the old version
-            // 延迟回收旧版本
-            guard.defer_destroy(old_shared);
-
-            Some(old_owned)
-        }
+        // Read the current value before swapping
+        // 在交换前读取当前值
+        let guard = self.inner.reader_registry.pin();
+        let old_value = self.inner.current.load(&guard).clone();
+        drop(guard);
+        
+        // Create a new boxed Arc value
+        // 创建新的装箱 Arc 值
+        let new_boxed = Box::new(new_value);
+        
+        // Store the new value and retire the old one
+        // 存储新值并退休旧值
+        self.inner.current.store(new_boxed, &mut self.writer);
+        
+        // Try to reclaim garbage
+        // 尝试回收垃圾
+        self.writer.try_reclaim();
+        
+        Some(old_value)
     }
 
     /// Apply a closure function to the current value and return the result as an Arc
@@ -194,7 +175,7 @@ impl<T> Swapper<Arc<T>> {
     }
 }
 
-impl<T> SwapReader<T> {
+impl<T: Send + 'static> SwapReader<T> {
     /// Read the current version (lock-free)
     ///
     /// Returns a SwapGuard that ensures the version will not be reclaimed while in use.
@@ -205,28 +186,13 @@ impl<T> SwapReader<T> {
     /// 返回一个SwapGuard，确保在使用期间版本不会被回收
     /// 如果容器已被销毁，则返回 None。
     pub fn read(&self) -> Option<SwapGuard<T>> {
-        let guard = epoch::pin();
-        let current = self.inner.current.load(Ordering::Acquire, &guard);
-
-        // Check for null to prevent race condition panic during drop
-        // 检查是否为 null，防止 drop 时的竞态 panic
-        if current.is_null() {
-            return None;
-        }
-
-        let value = unsafe {
-            // SAFETY:
-            // - We checked that current is not null
-            // - guard ensures the epoch does not advance and the version is not reclaimed
-            // SAFETY:
-            // - 我们检查了 current 不为 null
-            // - guard 确保 epoch 不会推进，版本不会被回收
-            current.as_ref().unwrap() as *const T
-        };
+        let guard = self.inner.reader_registry.pin();
+        let value_ref = self.inner.current.load(&guard);
+        let value_ptr = value_ref as *const T;
 
         Some(SwapGuard {
             _guard: guard,
-            value,
+            value: value_ptr,
         })
     }
 
@@ -324,21 +290,6 @@ impl<T: std::fmt::Display> std::fmt::Display for SwapGuard<T> {
     }
 }
 
-impl<T> Drop for SwapState<T> {
-    fn drop(&mut self) {
-        // Fix 1: Must use pin() to safely destroy the last value
-        // 修复 1: 必须使用 pin() 来安全地销毁最后一个值
-        let guard = &epoch::pin();
-        let current = self.current.swap(Shared::null(), Ordering::Relaxed, guard);
-        if !current.is_null() {
-            // SAFETY: `guard` is obtained via pin() and is valid
-            // SAFETY: `guard` 是通过 pin() 获取的，是有效的
-            unsafe {
-                guard.defer_destroy(current);
-            }
-        }
-    }
-}
 
 // SAFETY: Swapper<T> is Send+Sync when T is Send+Sync
 // SAFETY: Swapper<T>是Send+Sync当T是Send+Sync
