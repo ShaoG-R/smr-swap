@@ -230,26 +230,6 @@ fn test_multiple_operations_same_guard() {
     assert_eq!(guard[0], 1);
 }
 
-/// Test reader read_or with default
-/// 测试读取者 read_or 与默认值
-#[test]
-fn test_reader_read_or() {
-    let (_swapper, reader) = new(42);
-
-    let guard = reader.read_or(|| 99);
-    assert_eq!(*guard, 42);
-}
-
-/// Test reader read_or with string default
-/// 测试读取者 read_or（字符串默认值）
-#[test]
-fn test_reader_read_or_string() {
-    let (_swapper, reader) = new(String::from("actual"));
-
-    let guard = reader.read_or(|| String::from("default"));
-    assert_eq!(*guard, "actual");
-}
-
 /// Test map with complex transformation
 /// 测试 map 与复杂转换
 #[test]

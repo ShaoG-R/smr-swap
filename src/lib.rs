@@ -261,31 +261,6 @@ impl<T> SwapReader<T> {
         }
     }
 
-    /// Try to read, returning a default value if it fails
-    ///
-    /// 尝试读取，如果失败则返回默认值
-    pub fn read_or<F>(&self, f: F) -> SwapGuard<T>
-    where
-        F: FnOnce() -> T,
-    {
-        self.read().unwrap_or_else(|| {
-            let guard = epoch::pin();
-            let default_value = f();
-            let default_ptr = Box::leak(Box::new(default_value)) as *const T;
-            SwapGuard {
-                _guard: guard,
-                value: default_ptr,
-            }
-        })
-    }
-
-    /// Get a clone of the internal Arc
-    ///
-    /// 获取对内部 Arc 的克隆
-    pub fn clone_inner(&self) -> Arc<SwapState<T>> {
-        self.inner.clone()
-    }
-
     /// Try to convert SwapGuard to an owned value (if possible)
     ///
     /// This method attempts to clone the value (if T implements Clone).
