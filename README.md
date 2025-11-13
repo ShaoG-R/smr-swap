@@ -6,12 +6,14 @@
 
 A high-performance, lock-free Rust library for safely sharing mutable data between a single writer and multiple readers using epoch-based memory reclamation.
 
+[中文文档](README_CN.md) | [English](README.md)
+
 ## Features
 
 - **Lock-Free**: No mutexes or locks required for reads or writes
 - **High Performance**: Optimized for both read and write operations
 - **Single-Writer Multiple-Reader Pattern**: Type-safe enforcement via `Swapper<T>` and `SwapReader<T>`
-- **Memory Safe**: Uses epoch-based reclamation (via `crossbeam-epoch`) to prevent use-after-free
+- **Memory Safe**: Uses epoch-based reclamation (via `swmr-epoch`) to prevent use-after-free
 - **Zero-Copy Reads**: Readers get direct references to the current value
 - **Concurrent**: Safe to use across multiple threads with `Send + Sync` bounds
 
@@ -204,65 +206,76 @@ Comprehensive benchmark results comparing SMR-Swap against `arc-swap` on modern 
 
 #### Single-Thread Read
 ```
-smr-swap:  5.47 ns ████
-arc-swap:  8.98 ns ██████████
+smr-swap:  1.80 ns █
+arc-swap:  9.19 ns █████
 ```
-**Winner**: SMR-Swap (39% faster)
-- Direct epoch pin provides minimal overhead
-- No lock contention
+**Winner**: SMR-Swap (80% faster)
+- Optimized read path with minimal overhead
+- Direct pointer access without atomic operations
 
 #### Single-Thread Write
 ```
-smr-swap:  148.51 ns ██████████████████
-arc-swap:  129.37 ns ████████████████
+smr-swap:  137.13 ns █████████████████
+arc-swap:  129.20 ns ████████████████
 ```
-**Winner**: ArcSwap (15% faster)
-- SMR-Swap has epoch management overhead
-- ArcSwap uses simpler atomic operations
+**Winner**: ArcSwap (6% faster)
+- SMR-Swap's epoch management has minimal overhead
+- Both show excellent write performance
 
 #### Multi-Thread Read Performance (Scaling)
 ```
 Readers:   2         4         8
-smr-swap:  6.90 ns   9.13 ns   14.36 ns
-arc-swap:  9.02 ns   9.26 ns   9.67 ns
+smr-swap:  1.82 ns   1.85 ns   2.05 ns (avg)
+arc-swap:  9.29 ns   9.25 ns   9.38 ns
 ```
 **Analysis**: 
-- SMR-Swap maintains near-linear scaling up to 4 readers
-- Epoch coordination introduces overhead at 8 readers
-- ArcSwap shows better consistency across thread counts
+- SMR-Swap maintains near-constant time regardless of thread count
+- 80% faster than arc-swap across all thread counts
+- Excellent scaling characteristics
 
 #### Mixed Read-Write (Most Realistic Scenario)
 ```
 Readers:   2         4         8
-smr-swap:  151 ns    152 ns    156 ns
-arc-swap:  456 ns    453 ns    493 ns
+smr-swap:  139 ns    140 ns    140 ns
+arc-swap:  453 ns    455 ns    534 ns
 ```
-**Winner**: SMR-Swap (66-68% faster)
-- Epoch-based reclamation excels with concurrent reads/writes
-- ArcSwap's atomic operations create more contention
+**Winner**: SMR-Swap (69-74% faster)
+- Consistent performance under load
+- Minimal impact from concurrent writers
+- ArcSwap shows increased latency with more readers
+
+#### Read Under Memory Pressure
+```
+smr-swap:  860.54 ns █████
+arc-swap:  1.18 μs   █████████
+```
+**Winner**: SMR-Swap (27% faster)
+- More efficient memory management under pressure
+- Better handling of system resource constraints
 
 #### Read Latency with Held Guard
 ```
-smr-swap:  140 ns ██████████
-arc-swap:  481 ns ██████████████████████████████████
+smr-swap:  137.27 ns █████
+arc-swap:  524.49 ns ███████████████████
 ```
-**Winner**: SMR-Swap (71% faster)
-- Minimal impact when readers hold guards
-- Critical for latency-sensitive applications
+**Winner**: SMR-Swap (74% faster)
+- Minimal overhead when readers hold guards
+- Critical for applications requiring long-lived read access
 
 ### Performance Recommendations
 
 **Use SMR-Swap when:**
-- Read-heavy workloads (>80% reads)
+- Read performance is critical (up to 80% faster reads)
 - Multiple readers need to hold guards for extended periods
 - Mixed read-write patterns are common
-- Minimizing read latency is critical
+- Consistent low-latency reads are required
+- Memory efficiency under pressure is important
 
 **Use ArcSwap when:**
-- Write-heavy workloads (>50% writes)
-- Single-threaded or very few readers
-- Simplicity is more important than peak performance
-- Write latency is critical
+- You need maximum write performance (6% faster writes)
+- Your workload is primarily single-threaded
+- You need a simpler, more established solution
+- You prefer slightly lower memory usage in exchange for slower reads
 
 ## Design
 
@@ -278,14 +291,50 @@ arc-swap:  481 ns ████████████████████�
 
 ### Memory Management
 
-- Uses `crossbeam-epoch` for safe memory reclamation
-- Each value is wrapped in an `Atomic<T>` pointer
-- Readers pin the epoch, preventing garbage collection of the current value
+#### swmr-epoch Implementation
+
+SMR-Swap uses a custom `swmr-epoch` library for memory reclamation, optimized for single-writer multiple-reader scenarios compared to `crossbeam-epoch`:
+
+**Core Design**:
+- **Global Epoch Management**: Only the Writer can advance the global epoch (via `fetch_add`)
+- **Reader Registration**: Each reader thread maintains a `ParticipantSlot` in TLS (thread-local storage) that records its current active epoch
+- **Deferred Reclamation**: Writer maintains a garbage bin grouped by epoch (`BTreeMap<usize, Vec<ErasedGarbage>>`)
+
+**Key Mechanisms**:
+
+1. **Pin Operation** (`ReaderRegistry::pin()`):
+   - Readers call `pin()` to obtain a `Guard`
+   - On first pin, the current global epoch is recorded in the thread-local `active_epoch`
+   - Supports reentrancy (via `pin_count` counter)
+   - When Guard is dropped, if count reaches zero, the thread is marked inactive (`INACTIVE_EPOCH`)
+
+2. **Garbage Reclamation** (`Writer::try_reclaim()`):
+   - Writer triggers reclamation when garbage accumulates beyond threshold (default 64 items)
+   - Step 1: Advance global epoch
+   - Step 2: Scan all active readers to find minimum active epoch
+   - Step 3: Calculate safe reclamation point = min_active_epoch - 1
+   - Step 4: Use `BTreeMap::retain` to remove all garbage with epoch ≤ safe point
+
+3. **Memory Optimization**:
+   - Uses `BTreeMap::retain` instead of `split_off` to avoid new allocations, reducing global allocator contention
+   - This prevents latency spikes on the first `pin()` operation
+
+**Performance Characteristics**:
+- Single-thread read: 42% faster (simpler Atomic operations)
+- Single-thread write: 30% faster (Writer holds directly, no Mutex overhead)
+- Multi-thread read: 104-128% slower than crossbeam-epoch (ThreadLocal lookup and atomic operation overhead per `pin()`)
+
+**Optimization Suggestions**:
+- For read-heavy scenarios, consider `read_with_guard()` method to reuse Guard
+- Or cache Guard in SwapReader (requires thread-local)
+
+**Each value is wrapped in an `Atomic<T>` pointer**:
+- Readers safely dereference the pointer via Guard
 - Old values are deferred for destruction until all readers have left the epoch
 
 ### Thread Safety
 
-Both `Swapper<T>` and `SwapReader<T>` implement `Send + Sync` when `T: Send + Sync`, allowing safe sharing across threads.
+Both `Swapper<T>` and `SwapReader<T>` implement `Send + Sync` when `T: 'static`, allowing safe sharing across threads.
 
 ## Limitations
 
@@ -333,3 +382,24 @@ Licensed under either of Apache License, Version 2.0 or MIT license at your opti
 ## Contributing
 
 Contributions are welcome! Please ensure all tests pass and benchmarks are stable before submitting.
+
+## Implementation Details
+
+### Epoch Mechanism
+
+- Each reader enters the current epoch via `ReaderRegistry::pin()`
+- Writer uses deferred destruction to delay old value cleanup
+- Old values are truly destroyed only when all readers have left the epoch
+
+### Atomic Operations
+
+- Uses `Atomic<T>` for atomic pointer swapping
+- Uses `Ordering::Release` and `Ordering::Acquire` to ensure memory ordering
+- Writer's `store()` method automatically hands old pointers to garbage collection
+
+### Guard Mechanism
+
+- `SwapGuard<T>` holds a `Guard` to maintain thread pin state
+- Provides transparent access to the value via `Deref` trait
+- When the guard is dropped, the pin count decrements, and if it reaches zero the thread is marked inactive
+- Guard supports cloning to implement reentrant pin

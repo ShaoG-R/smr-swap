@@ -35,7 +35,7 @@ pub struct SwapReader<T> {
 /// Create a new SMR container, returning a (Swapper, SwapReader) tuple
 ///
 /// 创建新的SMR容器，返回(Swapper, SwapReader)元组
-pub fn new<T: Send + 'static>(initial: T) -> (Swapper<T>, SwapReader<T>) {
+pub fn new<T: 'static>(initial: T) -> (Swapper<T>, SwapReader<T>) {
     // Create the SWMR epoch system
     // 创建 SWMR 纪元系统
     let (writer, reader_registry) = swmr_epoch::new();
@@ -56,7 +56,7 @@ pub fn new<T: Send + 'static>(initial: T) -> (Swapper<T>, SwapReader<T>) {
 }
 
 
-impl<T: Send + 'static> Swapper<T> {
+impl<T: 'static> Swapper<T> {
     /// Perform a write operation to update the current version
     ///
     /// 执行写入操作，更新当前版本
@@ -116,7 +116,7 @@ impl<T: Send + 'static> Swapper<T> {
     }
 }
 
-impl<T: Send + Sync + 'static> Swapper<Arc<T>> {
+impl<T: 'static> Swapper<Arc<T>> {
     /// Atomically swap the current Arc value with a new one
     ///
     /// This method replaces the current Arc-wrapped value with a new one and returns the old value.
@@ -175,7 +175,7 @@ impl<T: Send + Sync + 'static> Swapper<Arc<T>> {
     }
 }
 
-impl<T: Send + 'static> SwapReader<T> {
+impl<T: 'static> SwapReader<T> {
     /// Read the current version (lock-free)
     ///
     /// Returns a SwapGuard that ensures the version will not be reclaimed while in use.
