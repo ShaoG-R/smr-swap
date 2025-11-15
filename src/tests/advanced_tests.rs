@@ -1,5 +1,5 @@
 //! Advanced API tests for SMR-Swap
-//! 
+//!
 //! Tests for advanced operations: map, filter, try_clone_value,
 //! update_and_fetch, swap, and reader operations
 
@@ -10,12 +10,13 @@ use crate::new;
 #[test]
 fn test_reader_map_int() {
     let (mut swapper, reader) = new(10);
+    let reader_epoch = reader.register_reader();
 
-    let result = reader.map(|x| x * 2);
+    let result = reader.map(&reader_epoch, |x| x * 2);
     assert_eq!(result, 20);
 
     swapper.update(5);
-    let result = reader.map(|x| x + 100);
+    let result = reader.map(&reader_epoch, |x| x + 100);
     assert_eq!(result, 105);
 }
 
@@ -24,12 +25,13 @@ fn test_reader_map_int() {
 #[test]
 fn test_reader_map_string() {
     let (mut swapper, reader) = new(String::from("hello"));
+    let reader_epoch = reader.register_reader();
 
-    let result = reader.map(|s| s.len());
+    let result = reader.map(&reader_epoch, |s| s.len());
     assert_eq!(result, 5);
 
     swapper.update(String::from("world!"));
-    let result = reader.map(|s| s.to_uppercase());
+    let result = reader.map(&reader_epoch, |s| s.to_uppercase());
     assert_eq!(result, String::from("WORLD!"));
 }
 
@@ -38,12 +40,13 @@ fn test_reader_map_string() {
 #[test]
 fn test_reader_map_vector() {
     let (mut swapper, reader) = new(vec![1, 2, 3]);
+    let reader_epoch = reader.register_reader();
 
-    let result = reader.map(|v| v.len());
+    let result = reader.map(&reader_epoch, |v| v.len());
     assert_eq!(result, 3);
 
     swapper.update(vec![1, 2, 3, 4, 5]);
-    let result = reader.map(|v| v.iter().sum::<i32>());
+    let result = reader.map(&reader_epoch, |v| v.iter().sum::<i32>());
     assert_eq!(result, 15);
 }
 
@@ -52,13 +55,14 @@ fn test_reader_map_vector() {
 #[test]
 fn test_reader_filter() {
     let (mut swapper, reader) = new(10);
+    let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(|x| *x > 5);
+    let guard = reader.filter(&reader_epoch, |x| *x > 5);
     assert!(guard.is_some());
     assert_eq!(*guard.unwrap(), 10);
 
     swapper.update(3);
-    let guard = reader.filter(|x| x > &5);
+    let guard = reader.filter(&reader_epoch, |x| x > &5);
     assert!(guard.is_none());
 }
 
@@ -67,13 +71,14 @@ fn test_reader_filter() {
 #[test]
 fn test_reader_filter_string() {
     let (mut swapper, reader) = new(String::from("hello"));
+    let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(|s| s.len() > 3);
+    let guard = reader.filter(&reader_epoch, |s| s.len() > 3);
     assert!(guard.is_some());
     assert_eq!(*guard.unwrap(), "hello");
 
     swapper.update(String::from("hi"));
-    let guard = reader.filter(|s| s.len() > 3);
+    let guard = reader.filter(&reader_epoch, |s| s.len() > 3);
     assert!(guard.is_none());
 }
 
@@ -82,13 +87,14 @@ fn test_reader_filter_string() {
 #[test]
 fn test_reader_filter_vector() {
     let (mut swapper, reader) = new(vec![1, 2, 3, 4, 5]);
+    let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(|v| v.len() > 3);
+    let guard = reader.filter(&reader_epoch, |v| v.len() > 3);
     assert!(guard.is_some());
     assert_eq!(*guard.unwrap(), vec![1, 2, 3, 4, 5]);
 
     swapper.update(vec![1, 2]);
-    let guard = reader.filter(|v| v.len() > 3);
+    let guard = reader.filter(&reader_epoch, |v| v.len() > 3);
     assert!(guard.is_none());
 }
 
@@ -97,14 +103,16 @@ fn test_reader_filter_vector() {
 #[test]
 fn test_writer_update_and_fetch() {
     let (mut swapper, reader) = new(10);
+    let writer_epoch = swapper.register_reader();
+    let reader_epoch = reader.register_reader();
 
-    let guard = swapper.update_and_fetch(|x| x * 2);
+    let guard = swapper.update_and_fetch(&writer_epoch, |x| x * 2);
     assert_eq!(*guard, 20);
-    assert_eq!(*reader.read(), 20);
+    assert_eq!(*reader.read(&reader_epoch), 20);
 
-    let guard = swapper.update_and_fetch(|x| x + 5);
+    let guard = swapper.update_and_fetch(&writer_epoch, |x| x + 5);
     assert_eq!(*guard, 25);
-    assert_eq!(*reader.read(), 25);
+    assert_eq!(*reader.read(&reader_epoch), 25);
 }
 
 /// Test writer update_and_fetch with strings
@@ -112,14 +120,16 @@ fn test_writer_update_and_fetch() {
 #[test]
 fn test_writer_update_and_fetch_string() {
     let (mut swapper, reader) = new(String::from("hello"));
+    let writer_epoch = swapper.register_reader();
+    let reader_epoch = reader.register_reader();
 
-    let guard = swapper.update_and_fetch(|s| s.to_uppercase());
+    let guard = swapper.update_and_fetch(&writer_epoch, |s| s.to_uppercase());
     assert_eq!(*guard, "HELLO");
-    assert_eq!(*reader.read(), "HELLO");
+    assert_eq!(*reader.read(&reader_epoch), "HELLO");
 
-    let guard = swapper.update_and_fetch(|s| format!("{} world", s));
+    let guard = swapper.update_and_fetch(&writer_epoch, |s| format!("{} world", s));
     assert_eq!(*guard, "HELLO world");
-    assert_eq!(*reader.read(), "HELLO world");
+    assert_eq!(*reader.read(&reader_epoch), "HELLO world");
 }
 
 /// Test writer update_and_fetch with vectors
@@ -127,14 +137,16 @@ fn test_writer_update_and_fetch_string() {
 #[test]
 fn test_writer_update_and_fetch_vector() {
     let (mut swapper, reader) = new(vec![1, 2, 3]);
+    let writer_epoch = swapper.register_reader();
+    let reader_epoch = reader.register_reader();
 
-    let guard = swapper.update_and_fetch(|v| {
+    let guard = swapper.update_and_fetch(&writer_epoch, |v| {
         let mut new_v = v.clone();
         new_v.push(4);
         new_v
     });
     assert_eq!(&*guard, &vec![1, 2, 3, 4]);
-    assert_eq!(&*reader.read(), &vec![1, 2, 3, 4]);
+    assert_eq!(&*reader.read(&reader_epoch), &vec![1, 2, 3, 4]);
 }
 
 /// Test writer read capability
@@ -142,14 +154,16 @@ fn test_writer_update_and_fetch_vector() {
 #[test]
 fn test_writer_read() {
     let (mut swapper, reader) = new(42);
+    let writer_epoch = swapper.register_reader();
+    let reader_epoch = reader.register_reader();
 
-    let guard = swapper.read();
+    let guard = swapper.read(&writer_epoch);
     assert_eq!(*guard, 42);
     drop(guard);
 
     swapper.update(100);
-    assert_eq!(*swapper.read(), 100);
-    assert_eq!(*reader.read(), 100);
+    assert_eq!(*swapper.read(&writer_epoch), 100);
+    assert_eq!(*reader.read(&reader_epoch), 100);
 }
 
 /// Test writer read with strings
@@ -157,14 +171,16 @@ fn test_writer_read() {
 #[test]
 fn test_writer_read_string() {
     let (mut swapper, reader) = new(String::from("test"));
+    let writer_epoch = swapper.register_reader();
+    let reader_epoch = reader.register_reader();
 
-    let guard = swapper.read();
+    let guard = swapper.read(&writer_epoch);
     assert_eq!(*guard, "test");
     drop(guard);
 
     swapper.update(String::from("updated"));
-    assert_eq!(*swapper.read(), "updated");
-    assert_eq!(*reader.read(), "updated");
+    assert_eq!(*swapper.read(&writer_epoch), "updated");
+    assert_eq!(*reader.read(&reader_epoch), "updated");
 }
 
 /// Test chained operations
@@ -172,15 +188,16 @@ fn test_writer_read_string() {
 #[test]
 fn test_chained_operations() {
     let (mut swapper, reader) = new(10);
+    let reader_epoch = reader.register_reader();
 
     // Chain: read -> filter -> map
     // 链式：read -> filter -> map
-    let guard = reader.read();
+    let guard = reader.read(&reader_epoch);
     let result = if *guard > 5 { *guard * 2 } else { 0 };
     assert_eq!(result, 20);
 
     swapper.update(5);
-    let guard = reader.read();
+    let guard = reader.read(&reader_epoch);
     let result = if *guard > 5 { *guard * 2 } else { 0 };
     assert_eq!(result, 0); // Value is 5, which is not > 5
 }
@@ -190,7 +207,8 @@ fn test_chained_operations() {
 #[test]
 fn test_multiple_operations_same_guard() {
     let (_swapper, reader) = new(vec![1, 2, 3, 4, 5]);
-    let guard = reader.read();
+    let reader_epoch = reader.register_reader();
+    let guard = reader.read(&reader_epoch);
 
     // Multiple operations on the same guard
     // 在同一 guard 上的多个操作
@@ -205,17 +223,15 @@ fn test_multiple_operations_same_guard() {
 #[test]
 fn test_map_complex_transformation() {
     let (mut swapper, reader) = new(vec![1, 2, 3, 4, 5]);
+    let reader_epoch = reader.register_reader();
 
-    let result = reader.map(|v| {
-        v.iter()
-            .filter(|x| *x % 2 == 0)
-            .map(|x| x * 2)
-            .sum::<i32>()
+    let result = reader.map(&reader_epoch, |v| {
+        v.iter().filter(|x| *x % 2 == 0).map(|x| x * 2).sum::<i32>()
     });
     assert_eq!(result, 12); // (2*2 + 4*2) = 12
 
     swapper.update(vec![10, 20, 30]);
-    let result = reader.map(|v| v.iter().sum::<i32>());
+    let result = reader.map(&reader_epoch, |v| v.iter().sum::<i32>());
     assert_eq!(result, 60);
 }
 
@@ -224,16 +240,13 @@ fn test_map_complex_transformation() {
 #[test]
 fn test_filter_complex_condition() {
     let (mut swapper, reader) = new(String::from("hello"));
+    let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(|s| {
-        s.len() > 3 && s.contains('l')
-    });
+    let guard = reader.filter(&reader_epoch, |s| s.len() > 3 && s.contains('l'));
     assert!(guard.is_some());
 
     swapper.update(String::from("hi"));
-    let guard = reader.filter(|s| {
-        s.len() > 3 && s.contains('l')
-    });
+    let guard = reader.filter(&reader_epoch, |s| s.len() > 3 && s.contains('l'));
     assert!(guard.is_none());
 }
 
@@ -242,9 +255,11 @@ fn test_filter_complex_condition() {
 #[test]
 fn test_update_and_fetch_side_effects() {
     let (mut swapper, reader) = new(vec![1, 2, 3]);
+    let writer_epoch = swapper.register_reader();
+    let reader_epoch = reader.register_reader();
 
     let mut call_count = 0;
-    let guard = swapper.update_and_fetch(|v| {
+    let guard = swapper.update_and_fetch(&writer_epoch, |v| {
         call_count += 1;
         let mut new_v = v.clone();
         new_v.push(4);
@@ -253,7 +268,7 @@ fn test_update_and_fetch_side_effects() {
 
     assert_eq!(call_count, 1);
     assert_eq!(&*guard, &vec![1, 2, 3, 4]);
-    assert_eq!(&*reader.read(), &vec![1, 2, 3, 4]);
+    assert_eq!(&*reader.read(&reader_epoch), &vec![1, 2, 3, 4]);
 }
 
 /// Test map returns None for empty option
@@ -261,14 +276,15 @@ fn test_update_and_fetch_side_effects() {
 #[test]
 fn test_map_with_none_value() {
     let (mut swapper, reader) = new(Some(42));
-    
+    let reader_epoch = reader.register_reader();
+
     // Map on Some value
-    let result = reader.map(|opt| opt.unwrap_or(0));
+    let result = reader.map(&reader_epoch, |opt| opt.unwrap_or(0));
     assert_eq!(result, 42);
-    
+
     // Map on None (after update)
     swapper.update(None::<i32>);
-    let result = reader.map(|opt| opt.unwrap_or(0));
+    let result = reader.map(&reader_epoch, |opt| opt.unwrap_or(0));
     assert_eq!(result, 0);
 }
 
@@ -277,8 +293,9 @@ fn test_map_with_none_value() {
 #[test]
 fn test_filter_always_true() {
     let (_swapper, reader) = new(42);
+    let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(|_| true);
+    let guard = reader.filter(&reader_epoch, |_| true);
     assert!(guard.is_some());
     assert_eq!(*guard.unwrap(), 42);
 }
@@ -288,7 +305,8 @@ fn test_filter_always_true() {
 #[test]
 fn test_filter_always_false() {
     let (_swapper, reader) = new(42);
+    let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(|_| false);
+    let guard = reader.filter(&reader_epoch, |_| false);
     assert!(guard.is_none());
 }
