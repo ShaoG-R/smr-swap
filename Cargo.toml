@@ -1,6 +1,6 @@
 [package]
 name = "smr-swap"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 authors = ["ShaoG <shaog.rs@gmail.com>"]
 description = "A lock-free, high-performance Single-Writer Multiple-Reader swap container using epoch-based memory reclamation"
@@ -12,7 +12,7 @@ keywords = ["lock-free", "concurrent", "memory-reclamation", "epoch", "swap"]
 categories = ["concurrency", "data-structures"]
 
 [dependencies]
-swmr-epoch = "0.3.1"
+swmr-epoch = "0.3.6"
 
 [dev-dependencies]
 arc-swap = "1.7"

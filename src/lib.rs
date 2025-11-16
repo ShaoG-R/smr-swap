@@ -356,15 +356,9 @@ impl<'a, T: std::fmt::Display> std::fmt::Display for SwapGuard<'a, T> {
     }
 }
 
-// SAFETY: Swapper<T> is Send+Sync when T is Send+Sync
-// SAFETY: Swapper<T>是Send+Sync当T是Send+Sync
-unsafe impl<T: Send + Sync> Send for Swapper<T> {}
-unsafe impl<T: Send + Sync> Sync for Swapper<T> {}
-
-// SAFETY: SwapReader<T> is Send+Sync when T is Send+Sync
-// SAFETY: SwapReader<T>是Send+Sync当T是Send+Sync
-unsafe impl<T: Send + Sync> Send for SwapReader<T> {}
-unsafe impl<T: Send + Sync> Sync for SwapReader<T> {}
+// SAFETY: Swapper<T> is Send when T is Send + 'static
+// SAFETY: Swapper<T>是Send当T是Send + 'static
+unsafe impl<T: Send + 'static> Send for Swapper<T> {}
 
 #[cfg(test)]
 mod tests;

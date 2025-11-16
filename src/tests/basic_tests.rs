@@ -220,7 +220,6 @@ fn test_send_sync_compilation() {
     fn assert_sync<T: Sync>() {}
 
     assert_send::<Swapper<i32>>();
-    assert_sync::<Swapper<i32>>();
     assert_send::<SwapReader<i32>>();
     assert_sync::<SwapReader<i32>>();
 }
