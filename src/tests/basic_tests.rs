@@ -215,13 +215,16 @@ fn test_multiple_held_guards() {
 /// Test Send+Sync trait bounds compilation
 /// 测试 Send+Sync 特性约束编译
 #[test]
-fn test_send_sync_compilation() {
+fn test_send_sync_compilation<'a>() {
     fn assert_send<T: Send>() {}
     fn assert_sync<T: Sync>() {}
 
     assert_send::<Swapper<i32>>();
     assert_send::<SwapReader<i32>>();
     assert_sync::<SwapReader<i32>>();
+
+    assert_send::<SwapReader<&'a i32>>();
+    assert_sync::<SwapReader<&'a i32>>();
 }
 
 /// Test with Box-wrapped values
