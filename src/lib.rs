@@ -38,7 +38,10 @@ pub struct SwapReader<T> {
 pub fn new<T: 'static>(initial: T) -> (Swapper<T>, SwapReader<T>) {
     // Create the epoch GC domain
     // 创建 epoch GC 域
-    let (gc, domain) = EpochGcDomain::new();
+    let (gc, domain) = EpochGcDomain::builder()
+        .auto_reclaim_threshold(None)
+        .cleanup_interval(2)
+        .build();
 
     let inner = Arc::new(SwapState {
         current: EpochPtr::new(initial),
@@ -147,11 +150,11 @@ impl<T: 'static> Swapper<T> {
         let new_value = f(&*guard);
         drop(guard);
         self.update(new_value);
-        
+
         // Trigger garbage collection
         // 触发垃圾回收
         self.gc.collect();
-        
+
         self.read(local_epoch)
     }
 
