@@ -1,6 +1,36 @@
-use std::ops::Deref;
+//! A lock-free, epoch-based concurrent swap library.
+//!
+//! This library provides a mechanism to swap values atomically while allowing concurrent readers
+//! to access the old value until they are done. It relies on `swmr-epoch` for epoch-based garbage collection.
+//!
+//! # Example
+//!
+//! ```rust
+//! use smr_swap::new;
+//! use std::thread;
+//!
+//! let (mut swapper, reader) = new(0);
+//!
+//! // Writer updates the value
+//! swapper.update(1);
+//!
+//! // Reader reads the value
+//! let reader_clone = reader.clone();
+//! let handle = thread::spawn(move || {
+//!     let local_epoch = reader_clone.register_reader();
+//!     let guard = local_epoch.pin();
+//!     let val = reader_clone.read(&guard);
+//!     assert_eq!(*val, 1);
+//! });
+//!
+//! handle.join().unwrap();
+//! ```
+
+#[cfg(loom)]
+use loom::sync::Arc;
+#[cfg(not(loom))]
 use std::sync::Arc;
-use swmr_epoch::{EpochGcDomain, EpochPtr, GcHandle, LocalEpoch, PinGuard};
+pub use swmr_epoch::{EpochGcDomain, EpochPtr, GcHandle, LocalEpoch, PinGuard};
 
 /// Internal shared state
 ///
@@ -73,45 +103,18 @@ impl<T: 'static> Swapper<T> {
         self.gc.collect();
     }
 
-    /// Get a read-only reference to the current value (via SwapGuard)
+    /// Get a read-only reference to the current value
     ///
     /// This is a convenience method that allows writers to also read the current value.
-    /// The writer must provide a LocalEpoch to pin itself.
+    /// The writer must provide a PinGuard to ensure the value is not reclaimed.
     ///
-    /// 获取当前值的只读引用（通过SwapGuard）
+    /// 获取当前值的只读引用
     ///
     /// 这是一个便利方法，允许写入者也能读取当前值。
-    /// 写入者必须提供 LocalEpoch 来 pin 自己。
+    /// 写入者必须提供 PinGuard 来确保值不会被回收。
     #[inline]
-    pub fn read<'a>(&self, local_epoch: &'a LocalEpoch) -> SwapGuard<'a, T> {
-        let guard = local_epoch.pin();
-        let value_ref = self.inner.current.load(&guard);
-        let value_ptr = value_ref as *const T;
-
-        SwapGuard {
-            _guard: guard,
-            value: value_ptr,
-        }
-    }
-
-    /// Execute a closure with a guard, allowing multiple operations on the same pinned version
-    ///
-    /// This method pins once and passes the SwapGuard to the closure.
-    /// Useful for performing multiple operations on the same version without re-pinning.
-    /// The guard is held for the entire duration of the closure execution.
-    ///
-    /// 使用guard执行闭包，允许在同一个pinned版本上执行多个操作
-    ///
-    /// 这个方法只pin一次，并将SwapGuard传递给闭包
-    /// 用于在不重新pin的情况下对同一版本执行多个操作
-    /// guard在整个闭包执行期间被持有
-    #[inline]
-    pub fn read_with_guard<F, R>(&self, local_epoch: &LocalEpoch, f: F) -> R
-    where
-        F: FnOnce(&SwapGuard<T>) -> R,
-    {
-        let guard = self.read(local_epoch);
-        f(&guard)
+    pub fn read<'a>(&self, guard: &'a PinGuard) -> &'a T {
+        self.inner.current.load(guard)
     }
 
     /// Apply a closure function to the current value and transform the result
@@ -128,34 +131,33 @@ impl<T: 'static> Swapper<T> {
     where
         F: FnOnce(&T) -> U,
     {
-        let guard = self.read(local_epoch);
-        f(&*guard)
+        let guard = local_epoch.pin();
+        f(self.read(&guard))
     }
 
     /// Apply a closure function to the current value and return the result
     ///
     /// The closure receives a reference to the current value and returns a new value.
-    /// Returns a SwapGuard to the new value.
+    /// Returns a reference to the new value.
     ///
     /// 对当前值应用闭包函数并返回结果
     ///
     /// 闭包接收当前值的引用，返回新值
-    /// 返回新值的 SwapGuard
+    /// 返回新值的引用
     #[inline]
-    pub fn update_and_fetch<'a, F>(&mut self, local_epoch: &'a LocalEpoch, f: F) -> SwapGuard<'a, T>
+    pub fn update_and_fetch<'a, F>(&mut self, guard: &'a PinGuard, f: F) -> &'a T
     where
         F: FnOnce(&T) -> T,
     {
-        let guard = self.read(local_epoch);
-        let new_value = f(&*guard);
-        drop(guard);
+        let old_val = self.read(guard);
+        let new_value = f(old_val);
         self.update(new_value);
 
         // Trigger garbage collection
         // 触发垃圾回收
         self.gc.collect();
 
-        self.read(local_epoch)
+        self.read(guard)
     }
 
     /// Register a new reader for the current thread
@@ -213,8 +215,9 @@ impl<T: 'static> Swapper<Arc<T>> {
     where
         F: FnOnce(&Arc<T>) -> Arc<T>,
     {
-        let guard = self.read(local_epoch);
-        let new_value = f(&*guard);
+        let guard = local_epoch.pin();
+        let current = self.read(&guard);
+        let new_value = f(current);
         drop(guard);
         self.swap(local_epoch, new_value.clone());
         new_value
@@ -224,43 +227,16 @@ impl<T: 'static> Swapper<Arc<T>> {
 impl<T: 'static> SwapReader<T> {
     /// Read the current version (lock-free)
     ///
-    /// Returns a SwapGuard that ensures the version will not be reclaimed while in use.
-    /// The reader must provide a LocalEpoch to pin itself.
+    /// Returns a reference to the current version.
+    /// The reader must provide a PinGuard to ensure the version will not be reclaimed while in use.
     ///
     /// 读取当前版本（无锁）
     ///
-    /// 返回一个SwapGuard，确保在使用期间版本不会被回收
-    /// 读取者必须提供 LocalEpoch 来 pin 自己
+    /// 返回当前版本的引用
+    /// 读取者必须提供 PinGuard 来确保在使用期间版本不会被回收
     #[inline]
-    pub fn read<'a>(&self, local_epoch: &'a LocalEpoch) -> SwapGuard<'a, T> {
-        let guard = local_epoch.pin();
-        let value_ref = self.inner.current.load(&guard);
-        let value_ptr = value_ref as *const T;
-
-        SwapGuard {
-            _guard: guard,
-            value: value_ptr,
-        }
-    }
-
-    /// Execute a closure with a guard, allowing multiple operations on the same pinned version
-    ///
-    /// This method pins once and passes the SwapGuard to the closure.
-    /// Useful for performing multiple operations on the same version without re-pinning.
-    /// The guard is held for the entire duration of the closure execution.
-    ///
-    /// 使用guard执行闭包，允许在同一个pinned版本上执行多个操作
-    ///
-    /// 这个方法只pin一次，并将SwapGuard传递给闭包
-    /// 用于在不重新pin的情况下对同一版本执行多个操作
-    /// guard在整个闭包执行期间被持有
-    #[inline]
-    pub fn read_with_guard<'a, F, R>(&self, local_epoch: &'a LocalEpoch, f: F) -> R
-    where
-        F: FnOnce(&SwapGuard<'a, T>) -> R,
-    {
-        let guard = self.read(local_epoch);
-        f(&guard)
+    pub fn read<'a>(&self, guard: &'a PinGuard) -> &'a T {
+        self.inner.current.load(guard)
     }
 
     /// Apply a closure function to the current value and transform the result
@@ -277,20 +253,20 @@ impl<T: 'static> SwapReader<T> {
     where
         F: FnOnce(&T) -> U,
     {
-        let guard = self.read(local_epoch);
-        f(&*guard)
+        let guard = local_epoch.pin();
+        f(self.read(&guard))
     }
 
     /// Apply a closure function to the current value, returning Some if the closure returns true, otherwise None
     ///
     /// 对当前值应用闭包函数，如果闭包返回 true 则返回 Some，否则返回 None
     #[inline]
-    pub fn filter<'a, F>(&self, local_epoch: &'a LocalEpoch, f: F) -> Option<SwapGuard<'a, T>>
+    pub fn filter<'a, F>(&self, guard: &'a PinGuard, f: F) -> Option<&'a T>
     where
         F: FnOnce(&T) -> bool,
     {
-        let guard = self.read(local_epoch);
-        if f(&*guard) { Some(guard) } else { None }
+        let val = self.read(guard);
+        if f(val) { Some(val) } else { None }
     }
 
     /// Register a new reader for the current thread
@@ -306,56 +282,6 @@ impl<T: 'static> SwapReader<T> {
     #[inline]
     pub fn register_reader(&self) -> LocalEpoch {
         self.inner.domain.register_reader()
-    }
-}
-
-/// Read guard that holds an epoch pin to ensure the version is not reclaimed
-///
-/// 读取守卫，持有epoch pin确保版本不被回收
-#[must_use = "SwapGuard must be held to ensure data is not reclaimed during access / SwapGuard 必须被持有以确保数据在访问期间不会被回收"]
-pub struct SwapGuard<'a, T> {
-    _guard: PinGuard<'a>,
-    value: *const T,
-}
-
-impl<'a, T> Deref for SwapGuard<'a, T> {
-    type Target = T;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        unsafe {
-            // SAFETY:
-            // - The value pointer is valid for the lifetime of SwapGuard
-            // - SwapGuard holds _guard to ensure the version is not reclaimed
-            // SAFETY:
-            // - value 指针在 SwapGuard 生命周期内有效
-            // - SwapGuard 持有 _guard 确保版本不被回收
-            &*self.value
-        }
-    }
-}
-
-impl<'a, T: Clone> SwapGuard<'a, T> {
-    /// Clone the protected value
-    ///
-    /// 克隆被保护的值
-    #[inline]
-    pub fn clone_value(&self) -> T {
-        self.deref().clone()
-    }
-}
-
-impl<'a, T: std::fmt::Debug> std::fmt::Debug for SwapGuard<'a, T> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SwapGuard").field("value", &**self).finish()
-    }
-}
-
-impl<'a, T: std::fmt::Display> std::fmt::Display for SwapGuard<'a, T> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", **self)
     }
 }
 

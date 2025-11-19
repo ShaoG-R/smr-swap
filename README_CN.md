@@ -25,7 +25,7 @@
 
 ```toml
 [dependencies]
-smr-swap = "0.3"
+smr-swap = "0.4"
 ```
 
 ### 基本用法
@@ -47,8 +47,9 @@ fn main() {
     swapper.update(vec![4, 5, 6]);
 
     // 读取者看到新值
-    let guard = reader.read(&reader_epoch);
-    println!("{:?}", *guard); // [4, 5, 6]
+    let guard = reader_epoch.pin();
+    let val = reader.read(&guard);
+    println!("{:?}", *val); // [4, 5, 6]
 }
 ```
 
@@ -67,8 +68,52 @@ fn main() {
     
     swapper.update(Arc::new(vec![4, 5, 6]));
     
-    let guard = reader.read(&reader_epoch);
-    println!("{:?}", *guard); // Arc<Vec<i32>>
+    let guard = reader_epoch.pin();
+    let val = reader.read(&guard);
+    println!("{:?}", *val); // Arc<Vec<i32>>
+}
+```
+
+### 多写入者支持 (使用 Mutex)
+
+由于 `Swapper<T>` 是单写入者的（不可 `Clone`），为了支持多写入者，你可以将其包装在 `Mutex` 中（并使用 `Arc` 进行共享）。SMR-Swap 高效的 `update` 操作通常使其比直接使用 `Mutex<T>` 或 `ArcSwap` 更快。
+
+```rust
+use smr_swap;
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+fn main() {
+    let (swapper, reader) = smr_swap::new(vec![1, 2, 3]);
+    // 将 swapper 包装在 Mutex 中以支持多写入者
+    let swapper = Arc::new(Mutex::new(swapper));
+    let reader = Arc::new(reader);
+    
+    let mut handles = vec![];
+
+    // 4 个写入者
+    for i in 0..4 {
+        let swapper_clone = swapper.clone();
+        handles.push(thread::spawn(move || {
+            // 加锁，更新，解锁
+            swapper_clone.lock().unwrap().update(vec![i; 3]);
+        }));
+    }
+
+    // 4 个读取者
+    for _ in 0..4 {
+        let reader_clone = reader.clone();
+        handles.push(thread::spawn(move || {
+            let local_epoch = reader_clone.register_reader();
+            let guard = local_epoch.pin();
+            let val = reader_clone.read(&guard);
+            println!("{:?}", *val);
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
 }
 ```
 
@@ -109,22 +154,13 @@ let writer_epoch = swapper.register_reader();
 swapper.update(new_value);
 ```
 
-#### `read<'a>(&self, local_epoch: &'a LocalEpoch) -> SwapGuard<'a, T>`
-获取当前值的只读引用（通过 SwapGuard）。
+#### `read<'a>(&self, guard: &'a PinGuard) -> &'a T`
+获取当前值的只读引用。需要提供 `PinGuard` 以确保值不会被回收。
 
 ```rust
-let guard = swapper.read(&local_epoch);
-println!("当前值: {:?}", *guard);
-```
-
-#### `read_with_guard<F, R>(&self, local_epoch: &LocalEpoch, f: F) -> R where F: FnOnce(&SwapGuard<T>) -> R`
-使用 guard 执行闭包，允许在同一个 pinned 版本上执行多个操作，无需重新 pin。
-
-```rust
-let len = swapper.read_with_guard(&local_epoch, |guard| {
-    println!("当前值: {:?}", *guard);
-    (*guard).len()
-});
+let guard = local_epoch.pin();
+let val = swapper.read(&guard);
+println!("当前值: {:?}", *val);
 ```
 
 #### `map<F, U>(&self, local_epoch: &LocalEpoch, f: F) -> U where F: FnOnce(&T) -> U`
@@ -134,11 +170,12 @@ let len = swapper.read_with_guard(&local_epoch, |guard| {
 let len = swapper.map(&local_epoch, |v| v.len());
 ```
 
-#### `update_and_fetch<'a, F>(&mut self, local_epoch: &'a LocalEpoch, f: F) -> SwapGuard<'a, T> where F: FnOnce(&T) -> T`
-使用提供的闭包原子地更新值，并返回新值的 guard。
+#### `update_and_fetch<'a, F>(&mut self, guard: &'a PinGuard, f: F) -> &'a T where F: FnOnce(&T) -> T`
+使用提供的闭包原子地更新值，并返回新值的引用。
 
 ```rust
-let guard = swapper.update_and_fetch(&local_epoch, |v| {
+let guard = local_epoch.pin();
+let val = swapper.update_and_fetch(&guard, |v| {
     let mut new_v = v.clone();
     new_v.push(42);
     new_v
@@ -188,22 +225,13 @@ println!("新值: {:?}", *new_arc); // [1, 2, 3, 4]
 
 ### 读取者操作 (SwapReader<T>)
 
-#### `read<'a>(&self, local_epoch: &'a LocalEpoch) -> SwapGuard<'a, T>`
-获取当前值的只读引用（通过 SwapGuard）。
+#### `read<'a>(&self, guard: &'a PinGuard) -> &'a T`
+获取当前值的只读引用。
 
 ```rust
-let guard = reader.read(&local_epoch);
-println!("当前值: {:?}", *guard);
-```
-
-#### `read_with_guard<'a, F, R>(&self, local_epoch: &'a LocalEpoch, f: F) -> R where F: FnOnce(&SwapGuard<'a, T>) -> R`
-使用 guard 执行闭包，允许在同一个 pinned 版本上执行多个操作，无需重新 pin。
-
-```rust
-let len = reader.read_with_guard(&local_epoch, |guard| {
-    println!("当前值: {:?}", *guard);
-    (*guard).len()
-});
+let guard = local_epoch.pin();
+let val = reader.read(&guard);
+println!("当前值: {:?}", *val);
 ```
 
 #### `map<'a, F, U>(&self, local_epoch: &'a LocalEpoch, f: F) -> U where F: FnOnce(&T) -> U`
@@ -213,12 +241,13 @@ let len = reader.read_with_guard(&local_epoch, |guard| {
 let len = reader.map(&local_epoch, |v| v.len());
 ```
 
-#### `filter<'a, F>(&self, local_epoch: &'a LocalEpoch, f: F) -> Option<SwapGuard<'a, T>> where F: FnOnce(&T) -> bool`
-仅当谓词为真时返回守卫。
+#### `filter<'a, F>(&self, guard: &'a PinGuard, f: F) -> Option<&'a T> where F: FnOnce(&T) -> bool`
+仅当谓词为真时返回当前值的引用。
 
 ```rust
-if let Some(guard) = reader.filter(&local_epoch, |v| !v.is_empty()) {
-    println!("非空: {:?}", *guard);
+let guard = local_epoch.pin();
+if let Some(val) = reader.filter(&guard, |v| !v.is_empty()) {
+    println!("非空: {:?}", *val);
 }
 ```
 
@@ -368,9 +397,9 @@ arc-swap:  908.69 ns ██████████████████
 // 读取者线程设置
 let local_epoch = reader.register_reader();
 
-// 所有读取操作都需要 LocalEpoch
-let guard = reader.read(&local_epoch);
-let result = reader.map(&local_epoch, |v| process(v));
+// 所有读取操作都需要 PinGuard
+let guard = local_epoch.pin();
+let val = reader.read(&guard);
 ```
 
 **优势**：
@@ -587,9 +616,10 @@ SMR-Swap 特别适合以下场景，其中读取性能至关重要且写入相�
 
 ### 守卫机制
 
-- `SwapGuard<'a, T>` 持有 `PinGuard<'a>` 以保持 Epoch pin 状态
-- 通过 `Deref` trait 提供对值的透明访问
-- 生命周期 `'a` 绑定到 `PinGuard`，由 Rust 借用检查器强制执行
+### 守卫机制
+
+- `PinGuard<'a>` 保持 Epoch pin 状态
+- `read` 返回 `&'a T`，其生命周期绑定到 `PinGuard`
 - 确保值不能在守卫被 drop 后被访问
 - `PinGuard` 支持 `Clone` 用于嵌套 pinning（增加 `pin_count`）
 

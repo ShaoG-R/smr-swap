@@ -1,6 +1,6 @@
 [package]
 name = "smr-swap"
-version = "0.3.3"
+version = "0.4.0"
 edition = "2024"
 authors = ["ShaoG <shaog.rs@gmail.com>"]
 description = "A minimal-locking, high-performance Single-Writer Multiple-Reader swap container using epoch-based memory reclamation"
@@ -11,13 +11,20 @@ documentation = "https://docs.rs/smr-swap"
 keywords = ["concurrent", "memory-reclamation", "epoch", "swap"]
 categories = ["concurrency", "data-structures"]
 
-[dependencies]
-swmr-epoch = "0.3.8"
-
 [dev-dependencies]
 arc-swap = "1.7"
 criterion = { version = "0.7.0", features = ["html_reports"] }
 tokio = { version = "1.48", features = ["full"] }
+
+[features]
+loom = ["dep:loom", "swmr-epoch/loom"]
+
+[dependencies]
+swmr-epoch = { version = "0.3.8" }
+loom = { version = "0.7", optional = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [[bench]]
 name = "comparison"

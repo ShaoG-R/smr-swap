@@ -27,8 +27,9 @@ fn test_concurrent_stress() {
             s.spawn(move || {
                 let reader_epoch = reader_clone.register_reader();
                 for _ in 0..10000 {
-                    let guard = reader_clone.read(&reader_epoch);
-                    let val = **guard;
+                    let guard = reader_epoch.pin();
+                    let val = reader_clone.read(&guard);
+                    let val = **val;
                     assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
@@ -36,7 +37,8 @@ fn test_concurrent_stress() {
     });
 
     let reader_epoch = reader.register_reader();
-    assert_eq!(**reader.read(&reader_epoch), num_updates);
+    let guard = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard), num_updates);
 }
 
 /// Test concurrent readers with multiple updates
@@ -59,8 +61,9 @@ fn test_concurrent_multiple_readers() {
             s.spawn(move || {
                 let reader_epoch = reader_clone.register_reader();
                 for _ in 0..1000 {
-                    let guard = reader_clone.read(&reader_epoch);
-                    let val = *guard;
+                    let guard = reader_epoch.pin();
+                    let val = reader_clone.read(&guard);
+                    let val = *val;
                     assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
@@ -93,8 +96,10 @@ fn test_drop_behavior_and_none() {
     let h_reader2 = thread::spawn(move || {
         b3.wait();
         let reader_epoch = reader_clone.register_reader();
-        let guard = reader_clone.read(&reader_epoch);
-        assert_eq!(*guard, 10);
+        let guard = reader_epoch.pin();
+        let val = reader_clone.read(&guard);
+        assert_eq!(*val, 10);
+        drop(guard);
         drop(reader_clone);
     });
 
@@ -116,8 +121,9 @@ fn test_drop_behavior_and_none() {
         s.spawn(move || {
             let reader_epoch = reader.register_reader();
             for _ in 0..1000 {
-                let guard = reader.read(&reader_epoch);
-                assert_eq!(*guard, 10);
+                let guard = reader_epoch.pin();
+                let val = reader.read(&guard);
+                assert_eq!(*val, 10);
             }
         });
     });
@@ -144,9 +150,11 @@ fn test_concurrent_readers_with_held_guards() {
                 let reader_epoch = reader_clone.register_reader();
                 // Hold multiple guards concurrently
                 // 并发持有多个 guard
-                let guard1 = reader_clone.read(&reader_epoch);
+                let guard1_pin = reader_epoch.pin();
+                let guard1 = reader_clone.read(&guard1_pin);
                 thread::sleep(std::time::Duration::from_millis(5));
-                let guard2 = reader_clone.read(&reader_epoch);
+                let guard2_pin = reader_epoch.pin();
+                let guard2 = reader_clone.read(&guard2_pin);
 
                 // Both guards should be valid
                 // 两个 guard 都应该有效
@@ -162,24 +170,36 @@ fn test_concurrent_readers_with_held_guards() {
 fn test_reader_holds_guard_during_updates() {
     let (mut swapper, reader) = new(0);
     let num_updates = 50;
+    // 引入 Barrier，需要同步 2 个线程
+    let barrier = Arc::new(Barrier::new(2));
 
     thread::scope(|s| {
+        let b_writer = barrier.clone();
         s.spawn(move || {
             for i in 1..=num_updates {
                 swapper.update(i);
             }
+            // 关键修复：等待 Reader 完成后再退出，防止 swapper 提前 drop 导致强制 GC
+            b_writer.wait();
         });
 
+        let b_reader = barrier.clone();
         s.spawn(move || {
             let reader_epoch = reader.register_reader();
             // Hold a guard for a while
             // 持有 guard 一段时间
-            let guard = reader.read(&reader_epoch);
+            let guard_pin = reader_epoch.pin();
+            let guard = reader.read(&guard_pin);
             let initial_value = *guard;
+
             thread::sleep(std::time::Duration::from_millis(10));
+
             // Guard should still be valid even after updates
             // 即使在更新后，guard 仍应有效
             assert_eq!(*guard, initial_value);
+
+            // Reader 完成任务，通知 Writer 可以退出了
+            b_reader.wait();
         });
     });
 }
@@ -204,8 +224,9 @@ fn test_many_concurrent_readers_frequent_updates() {
             s.spawn(move || {
                 let reader_epoch = reader_clone.register_reader();
                 for _ in 0..5000 {
-                    let guard = reader_clone.read(&reader_epoch);
-                    let val = *guard;
+                    let guard = reader_epoch.pin();
+                    let val = reader_clone.read(&guard);
+                    let val = *val;
                     assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
@@ -213,7 +234,8 @@ fn test_many_concurrent_readers_frequent_updates() {
     });
 
     let reader_epoch = reader.register_reader();
-    assert_eq!(*reader.read(&reader_epoch), num_updates);
+    let guard = reader_epoch.pin();
+    assert_eq!(*reader.read(&guard), num_updates);
 }
 
 /// Test rapid reader creation and cloning
@@ -235,8 +257,9 @@ fn test_rapid_reader_creation() {
             s.spawn(move || {
                 let reader_epoch = reader_clone.register_reader();
                 for _ in 0..1000 {
-                    let guard = reader_clone.read(&reader_epoch);
-                    let _ = *guard;
+                    let guard = reader_epoch.pin();
+                    let val = reader_clone.read(&guard);
+                    let _ = *val;
                 }
             });
         }
@@ -264,9 +287,10 @@ fn test_reader_consistency_concurrent_updates() {
                 for _ in 0..1000 {
                     // Each read should return a valid vector with a single element
                     // 每次读取都应返回一个有效的向量，包含单个元素
-                    let guard = reader_clone.read(&reader_epoch);
-                    assert_eq!(guard.len(), 1);
-                    let val = guard[0];
+                    let guard = reader_epoch.pin();
+                    let val = reader_clone.read(&guard);
+                    assert_eq!(val.len(), 1);
+                    let val = val[0];
                     assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
@@ -297,8 +321,9 @@ fn test_synchronization_with_barrier() {
                 let reader_epoch = reader_clone.register_reader();
                 b.wait();
                 for _ in 0..1000 {
-                    let guard = reader_clone.read(&reader_epoch);
-                    let _ = *guard;
+                    let guard = reader_epoch.pin();
+                    let val = reader_clone.read(&guard);
+                    let _ = *val;
                 }
             });
         }

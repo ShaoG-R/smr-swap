@@ -17,8 +17,9 @@ fn bench_single_thread_read(c: &mut Criterion) {
         let (_swapper, reader) = smr_swap::new(vec![1; 1000]);
         let local_epoch = reader.register_reader();
         b.iter(|| {
-            let guard = reader.read(&local_epoch);
-            black_box(&*guard);
+            let guard = local_epoch.pin();
+            let val = reader.read(&guard);
+            black_box(&*val);
         });
     });
 
@@ -88,8 +89,9 @@ fn bench_multi_thread_read(c: &mut Criterion) {
                             s.spawn(move || {
                                 let local_epoch = reader_clone.register_reader();
                                 for _ in 0..iters {
-                                    let guard = reader_clone.read(&local_epoch);
-                                    black_box(&*guard);
+                                    let guard = local_epoch.pin();
+                                    let val = reader_clone.read(&guard);
+                                    black_box(&*val);
                                 }
                             });
                         }
@@ -160,8 +162,9 @@ fn bench_mixed_read_write(c: &mut Criterion) {
                             s.spawn(move || {
                                 let local_epoch = reader_clone.register_reader();
                                 for _ in 0..iters {
-                                    let guard = reader_clone.read(&local_epoch);
-                                    black_box(&*guard);
+                                    let guard = local_epoch.pin();
+                                    let val = reader_clone.read(&guard);
+                                    black_box(&*val);
                                 }
                             });
                         }
@@ -247,7 +250,44 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
                             s.spawn(move || {
                                 let local_epoch = reader_clone.register_reader();
                                 for _ in 0..iters {
-                                    let guard = reader_clone.read(&local_epoch);
+                                    let guard = local_epoch.pin();
+                                    let val = reader_clone.read(&guard);
+                                    black_box(&*val);
+                                }
+                            });
+                        }
+                    });
+                    start.elapsed()
+                });
+            },
+        );
+
+        // Mutex 多写多读
+        group.bench_with_input(
+            BenchmarkId::new("mutex", num_readers),
+            num_readers,
+            |b, &num_readers| {
+                b.iter_custom(|iters| {
+                    let mutex = Arc::new(Mutex::new(vec![1; 1000]));
+
+                    let start = std::time::Instant::now();
+                    thread::scope(|s| {
+                        // 写入者线程
+                        for _ in 0..num_writers {
+                            let mutex_clone = mutex.clone();
+                            s.spawn(move || {
+                                for i in 0..iters {
+                                    *mutex_clone.lock().unwrap() = vec![i as u32; 1000];
+                                }
+                            });
+                        }
+
+                        // 读取者线程
+                        for _ in 0..num_readers {
+                            let mutex_clone = mutex.clone();
+                            s.spawn(move || {
+                                for _ in 0..iters {
+                                    let guard = mutex_clone.lock().unwrap();
                                     black_box(&*guard);
                                 }
                             });
@@ -317,9 +357,11 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
                 s.spawn(move || {
                     let local_epoch = reader_clone.register_reader();
                     // 读取者持有守卫
-                    let _guard = reader_clone.read(&local_epoch);
+                    let guard = local_epoch.pin();
+                    let _val = reader_clone.read(&guard);
                     // 模拟长时间持有
                     std::thread::sleep(std::time::Duration::from_micros(10));
+                    drop(guard);
                 });
 
                 // 写入者尝试写入
@@ -379,9 +421,10 @@ fn bench_batch_read(c: &mut Criterion) {
                         let local_epoch = reader_clone.register_reader();
                         for _ in 0..iters {
                             // 批量读取：一个 pin 内多次读取
-                            let guard = reader_clone.read(&local_epoch);
+                            let guard = local_epoch.pin();
+                            let val = reader_clone.read(&guard);
                             for _ in 0..10 {
-                                black_box(&*guard);
+                                black_box(&*val);
                             }
                         }
                     });
@@ -442,8 +485,9 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
                 s.spawn(move || {
                     let local_epoch = reader_clone.register_reader();
                     for _ in 0..iters {
-                        let guard = reader_clone.read(&local_epoch);
-                        black_box(&*guard);
+                        let guard = local_epoch.pin();
+                        let val = reader_clone.read(&guard);
+                        black_box(&*val);
                     }
                 });
 

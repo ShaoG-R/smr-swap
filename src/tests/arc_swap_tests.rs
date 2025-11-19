@@ -15,7 +15,8 @@ fn test_arc_swap_basic_int() {
 
     let old_value = swapper.swap(&writer_epoch, Arc::new(100));
     assert_eq!(*old_value, 42);
-    assert_eq!(**reader.read(&reader_epoch), 100);
+    let guard = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard), 100);
 }
 
 /// Test basic swap operation with Arc-wrapped strings
@@ -28,7 +29,8 @@ fn test_arc_swap_basic_string() {
 
     let old_value = swapper.swap(&writer_epoch, Arc::new(String::from("world")));
     assert_eq!(*old_value, "hello");
-    assert_eq!(**reader.read(&reader_epoch), "world");
+    let guard = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard), "world");
 }
 
 /// Test basic swap operation with Arc-wrapped vectors
@@ -41,7 +43,8 @@ fn test_arc_swap_basic_vector() {
 
     let old_value = swapper.swap(&writer_epoch, Arc::new(vec![4, 5, 6]));
     assert_eq!(*old_value, vec![1, 2, 3]);
-    assert_eq!(**reader.read(&reader_epoch), vec![4, 5, 6]);
+    let guard = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard), vec![4, 5, 6]);
 }
 
 /// Test multiple sequential swaps
@@ -52,10 +55,16 @@ fn test_arc_multiple_swaps() {
     let writer_epoch = swapper.register_reader();
     let reader_epoch = reader.register_reader();
 
-    for i in 1..=10 {
-        let old = swapper.swap(&writer_epoch, Arc::new(i));
-        assert_eq!(*old, i - 1);
-        assert_eq!(**reader.read(&reader_epoch), i);
+    for _ in 1..=10 {
+        for i in 1..=10 {
+            let old = swapper.swap(&writer_epoch, Arc::new(i));
+            assert_eq!(*old, i - 1);
+            let guard = reader_epoch.pin();
+            assert_eq!(**reader.read(&guard), i);
+        }
+        // Reset to 0 for the next iteration
+        // 重置为 0 以便下一次迭代
+        swapper.swap(&writer_epoch, Arc::new(0));
     }
 }
 
@@ -109,7 +118,8 @@ fn test_arc_update_and_fetch_arc_basic() {
 
     let result = swapper.update_and_fetch_arc(&writer_epoch, |x| Arc::new(**x * 2));
     assert_eq!(*result, 20);
-    assert_eq!(**reader.read(&reader_epoch), 20);
+    let guard = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard), 20);
 }
 
 /// Test update_and_fetch_arc with strings
@@ -122,7 +132,8 @@ fn test_arc_update_and_fetch_arc_string() {
 
     let result = swapper.update_and_fetch_arc(&writer_epoch, |s| Arc::new(s.to_uppercase()));
     assert_eq!(*result, "HELLO");
-    assert_eq!(**reader.read(&reader_epoch), "HELLO");
+    let guard = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard), "HELLO");
 }
 
 /// Test update_and_fetch_arc with vectors
@@ -140,7 +151,8 @@ fn test_arc_update_and_fetch_arc_vector() {
     });
 
     assert_eq!(*result, vec![1, 2, 3, 4]);
-    assert_eq!(**reader.read(&reader_epoch), vec![1, 2, 3, 4]);
+    let guard = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard), vec![1, 2, 3, 4]);
 }
 
 /// Test update_and_fetch_arc multiple times
@@ -155,7 +167,8 @@ fn test_arc_update_and_fetch_arc_multiple() {
         let result = swapper.update_and_fetch_arc(&writer_epoch, |x| Arc::new(**x + i));
         let expected = (1..=i).sum::<i32>();
         assert_eq!(*result, expected);
-        assert_eq!(**reader.read(&reader_epoch), expected);
+        let guard = reader_epoch.pin();
+        assert_eq!(**reader.read(&guard), expected);
     }
 }
 
@@ -193,8 +206,10 @@ fn test_arc_swap_shared_across_readers() {
 
     // Both readers should see the new value
     // 两个读取者都应该看到新值
-    assert_eq!(**reader1.read(&reader1_epoch), "v2");
-    assert_eq!(**reader2.read(&reader2_epoch), "v2");
+    let guard1 = reader1_epoch.pin();
+    let guard2 = reader2_epoch.pin();
+    assert_eq!(**reader1.read(&guard1), "v2");
+    assert_eq!(**reader2.read(&guard2), "v2");
 
     // Old Arc is still valid
     // 旧的 Arc 仍然有效
@@ -219,8 +234,10 @@ fn test_arc_update_and_fetch_arc_shared() {
 
     // All readers should see the updated value
     // 所有读取者都应该看到更新后的值
-    assert_eq!(**reader1.read(&reader1_epoch), vec![1, 2, 3, 4]);
-    assert_eq!(**reader2.read(&reader2_epoch), vec![1, 2, 3, 4]);
+    let guard1 = reader1_epoch.pin();
+    let guard2 = reader2_epoch.pin();
+    assert_eq!(**reader1.read(&guard1), vec![1, 2, 3, 4]);
+    assert_eq!(**reader2.read(&guard2), vec![1, 2, 3, 4]);
     assert_eq!(*result, vec![1, 2, 3, 4]);
 }
 
@@ -255,7 +272,8 @@ fn test_arc_swap_complex_struct() {
     assert_eq!(old.id, 1);
     assert_eq!(old.name, "first");
 
-    let current = reader.read(&reader_epoch);
+    let guard = reader_epoch.pin();
+    let current = reader.read(&guard);
     assert_eq!(current.id, 2);
     assert_eq!(current.name, "second");
 }
@@ -287,7 +305,8 @@ fn test_arc_update_and_fetch_arc_complex_struct() {
     assert_eq!(result.count, 1);
     assert_eq!(result.label, "initial_incremented");
 
-    let current = reader.read(&reader_epoch);
+    let guard = reader_epoch.pin();
+    let current = reader.read(&guard);
     assert_eq!(current.count, 1);
     assert_eq!(current.label, "initial_incremented");
 }
@@ -303,22 +322,29 @@ fn test_arc_swap_and_update_interleaved() {
     // First swap
     let old1 = swapper.swap(&writer_epoch, Arc::new(10));
     assert_eq!(*old1, 0);
-    assert_eq!(**reader.read(&reader_epoch), 10);
+    let guard1 = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard1), 10);
+    drop(guard1);
 
     // Then update_and_fetch_arc
     let result1 = swapper.update_and_fetch_arc(&writer_epoch, |x| Arc::new(**x * 2));
     assert_eq!(*result1, 20);
-    assert_eq!(**reader.read(&reader_epoch), 20);
+    let guard2 = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard2), 20);
+    drop(guard2);
 
     // Another swap
     let old2 = swapper.swap(&writer_epoch, Arc::new(100));
     assert_eq!(*old2, 20);
-    assert_eq!(**reader.read(&reader_epoch), 100);
+    let guard3 = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard3), 100);
+    drop(guard3);
 
     // Another update_and_fetch_arc
     let result2 = swapper.update_and_fetch_arc(&writer_epoch, |x| Arc::new(**x + 50));
     assert_eq!(*result2, 150);
-    assert_eq!(**reader.read(&reader_epoch), 150);
+    let guard4 = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard4), 150);
 }
 
 /// Test Arc swap with nested Arc
@@ -335,7 +361,8 @@ fn test_arc_swap_nested_arc() {
     );
 
     assert_eq!(**old, "nested");
-    assert_eq!(***reader.read(&reader_epoch), "new_nested");
+    let guard = reader_epoch.pin();
+    assert_eq!(***reader.read(&guard), "new_nested");
 }
 
 /// Test update_and_fetch_arc with side effects
@@ -356,5 +383,6 @@ fn test_arc_update_and_fetch_arc_side_effects() {
 
     assert_eq!(call_count, 1);
     assert_eq!(*result, vec![1, 2, 3, 4]);
-    assert_eq!(**reader.read(&reader_epoch), vec![1, 2, 3, 4]);
+    let guard = reader_epoch.pin();
+    assert_eq!(**reader.read(&guard), vec![1, 2, 3, 4]);
 }

@@ -11,4 +11,3 @@ mod advanced_tests;
 mod arc_swap_tests;
 mod basic_tests;
 mod concurrent_tests;
-mod guard_tests;

@@ -25,7 +25,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-smr-swap = "0.3"
+smr-swap = "0.4"
 ```
 
 ### Basic Usage
@@ -47,8 +47,9 @@ fn main() {
     swapper.update(vec![4, 5, 6]);
 
     // Reader sees the new value
-    let guard = reader.read(&reader_epoch);
-    println!("{:?}", *guard); // [4, 5, 6]
+    let guard = reader_epoch.pin();
+    let val = reader.read(&guard);
+    println!("{:?}", *val); // [4, 5, 6]
 }
 ```
 
@@ -67,8 +68,52 @@ fn main() {
     
     swapper.update(Arc::new(vec![4, 5, 6]));
     
-    let guard = reader.read(&reader_epoch);
-    println!("{:?}", *guard); // Arc<Vec<i32>>
+    let guard = reader_epoch.pin();
+    let val = reader.read(&guard);
+    println!("{:?}", *val); // Arc<Vec<i32>>
+}
+```
+
+### Multi-Writer Support (using Mutex)
+
+Since `Swapper<T>` is single-writer (not `Clone`), to support multiple writers, you can wrap it in a `Mutex` (and `Arc` for sharing). SMR-Swap's efficient `update` often makes this faster than using `Mutex<T>` directly or `ArcSwap`.
+
+```rust
+use smr_swap;
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+fn main() {
+    let (swapper, reader) = smr_swap::new(vec![1, 2, 3]);
+    // Wrap swapper in Mutex for multiple writers
+    let swapper = Arc::new(Mutex::new(swapper));
+    let reader = Arc::new(reader);
+    
+    let mut handles = vec![];
+
+    // 4 Writers
+    for i in 0..4 {
+        let swapper_clone = swapper.clone();
+        handles.push(thread::spawn(move || {
+            // Lock, update, and unlock
+            swapper_clone.lock().unwrap().update(vec![i; 3]);
+        }));
+    }
+
+    // 4 Readers
+    for _ in 0..4 {
+        let reader_clone = reader.clone();
+        handles.push(thread::spawn(move || {
+            let local_epoch = reader_clone.register_reader();
+            let guard = local_epoch.pin();
+            let val = reader_clone.read(&guard);
+            println!("{:?}", *val);
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
 }
 ```
 
@@ -109,22 +154,13 @@ Atomically replaces the current value.
 swapper.update(new_value);
 ```
 
-#### `read<'a>(&self, local_epoch: &'a LocalEpoch) -> SwapGuard<'a, T>`
-Gets a read-only reference to the current value (via SwapGuard).
+#### `read<'a>(&self, guard: &'a PinGuard) -> &'a T`
+Gets a read-only reference to the current value. Requires a `PinGuard` to ensure the value is not reclaimed.
 
 ```rust
-let guard = swapper.read(&local_epoch);
-println!("Current: {:?}", *guard);
-```
-
-#### `read_with_guard<F, R>(&self, local_epoch: &LocalEpoch, f: F) -> R where F: FnOnce(&SwapGuard<T>) -> R`
-Executes a closure with a guard, allowing multiple operations on the same pinned version without re-pinning.
-
-```rust
-let len = swapper.read_with_guard(&local_epoch, |guard| {
-    println!("Current: {:?}", *guard);
-    (*guard).len()
-});
+let guard = local_epoch.pin();
+let val = swapper.read(&guard);
+println!("Current: {:?}", *val);
 ```
 
 #### `map<F, U>(&self, local_epoch: &LocalEpoch, f: F) -> U where F: FnOnce(&T) -> U`
@@ -134,11 +170,12 @@ Applies a closure to the current value and returns the result.
 let len = swapper.map(&local_epoch, |v| v.len());
 ```
 
-#### `update_and_fetch<'a, F>(&mut self, local_epoch: &'a LocalEpoch, f: F) -> SwapGuard<'a, T> where F: FnOnce(&T) -> T`
-Atomically updates the value using the provided closure and returns a guard to the new value.
+#### `update_and_fetch<'a, F>(&mut self, guard: &'a PinGuard, f: F) -> &'a T where F: FnOnce(&T) -> T`
+Atomically updates the value using the provided closure and returns a reference to the new value.
 
 ```rust
-let guard = swapper.update_and_fetch(&local_epoch, |v| {
+let guard = local_epoch.pin();
+let val = swapper.update_and_fetch(&guard, |v| {
     let mut new_v = v.clone();
     new_v.push(42);
     new_v
@@ -188,22 +225,13 @@ println!("New value: {:?}", *new_arc); // [1, 2, 3, 4]
 
 ### Reader Operations (SwapReader<T>)
 
-#### `read<'a>(&self, local_epoch: &'a LocalEpoch) -> SwapGuard<'a, T>`
-Gets a read-only reference to the current value (via SwapGuard).
+#### `read<'a>(&self, guard: &'a PinGuard) -> &'a T`
+Gets a read-only reference to the current value.
 
 ```rust
-let guard = reader.read(&local_epoch);
-println!("Current: {:?}", *guard);
-```
-
-#### `read_with_guard<'a, F, R>(&self, local_epoch: &'a LocalEpoch, f: F) -> R where F: FnOnce(&SwapGuard<'a, T>) -> R`
-Executes a closure with a guard, allowing multiple operations on the same pinned version without re-pinning.
-
-```rust
-let len = reader.read_with_guard(&local_epoch, |guard| {
-    println!("Current: {:?}", *guard);
-    (*guard).len()
-});
+let guard = local_epoch.pin();
+let val = reader.read(&guard);
+println!("Current: {:?}", *val);
 ```
 
 #### `map<'a, F, U>(&self, local_epoch: &'a LocalEpoch, f: F) -> U where F: FnOnce(&T) -> U`
@@ -213,12 +241,13 @@ Applies a closure to the current value and returns the result.
 let len = reader.map(&local_epoch, |v| v.len());
 ```
 
-#### `filter<'a, F>(&self, local_epoch: &'a LocalEpoch, f: F) -> Option<SwapGuard<'a, T>> where F: FnOnce(&T) -> bool`
-Returns a guard to the current value if the closure returns true.
+#### `filter<'a, F>(&self, guard: &'a PinGuard, f: F) -> Option<&'a T> where F: FnOnce(&T) -> bool`
+Returns a reference to the current value if the closure returns true.
 
 ```rust
-if let Some(guard) = reader.filter(&local_epoch, |v| !v.is_empty()) {
-    println!("Non-empty: {:?}", *guard);
+let guard = local_epoch.pin();
+if let Some(val) = reader.filter(&guard, |v| !v.is_empty()) {
+    println!("Non-empty: {:?}", *val);
 }
 ```
 
@@ -246,9 +275,9 @@ Comprehensive benchmark results comparing SMR-Swap against `arc-swap` on modern 
 | Mixed R/W (4 readers) | 92.89 ns | 451.09 ns | **79% faster** | 1 writer + 4 readers |
 | Mixed R/W (8 readers) | 93.85 ns | 493.12 ns | **81% faster** | 1 writer + 8 readers |
 | Batch Read | 1.62 ns | 9.91 ns | **84% faster** | Optimized batch reads |
-| Multi-Writer (4 readers) | 629.63 ns | 1.92 µs | **67% faster** | 4 writers + 4 readers (Mutex) |
-| Multi-Writer (8 readers) | 640.33 ns | 2.23 µs | **71% faster** | 4 writers + 8 readers (Mutex) |
-| Multi-Writer (16 readers) | 626.57 ns | 2.85 µs | **78% faster** | 4 writers + 16 readers (Mutex) |
+| Multi-Writer (4 readers) | 664.63 ns | 1.92 µs | **65% faster** | 4 writers + 4 readers (Mutex) |
+| Multi-Writer (8 readers) | 593.18 ns | 2.22 µs | **73% faster** | 4 writers + 8 readers (Mutex) |
+| Multi-Writer (16 readers) | 652.44 ns | 2.93 µs | **78% faster** | 4 writers + 16 readers (Mutex) |
 | Read with Held Guard | 89.91 ns | 908.69 ns | **90% faster** | Reader holds guard during write |
 | Read Under Memory Pressure | 741.47 ns | 1.58 µs | **53% faster** | Aggressive GC collection |
 
@@ -299,13 +328,15 @@ arc-swap:  446 ns    451 ns    493 ns
 #### Multi-Writer Multi-Reader Performance
 ```
 Config:    4W+4R     4W+8R     4W+16R
-smr-swap:  0.63 µs   0.64 µs   0.63 µs
-arc-swap:  1.92 µs   2.23 µs   2.85 µs
+smr-swap:  0.66 µs   0.59 µs   0.65 µs
+mutex:     1.07 µs   1.44 µs   2.04 µs
+arc-swap:  1.92 µs   2.22 µs   2.93 µs
 ```
-**Winner**: SMR-Swap (67-78% faster)
-- Even though SMR-Swap requires a `Mutex` to support multiple writers, it still significantly outperforms ArcSwap
-- ArcSwap write latency increases noticeably as reader count grows
-- Demonstrates the efficiency of SMR-Swap's core mechanism
+**Winner**: SMR-Swap (65-78% faster than ArcSwap, 38-68% faster than Mutex)
+- SMR-Swap (wrapped in Mutex) outperforms both pure Mutex and ArcSwap
+- Pure Mutex performance degrades significantly as reader count increases (contention)
+- ArcSwap is the slowest in this workload
+- Demonstrates the efficiency of SMR-Swap's core mechanism even when wrapped in a lock
 
 #### Read Under Memory Pressure
 ```
@@ -368,9 +399,9 @@ The new API design requires explicit `LocalEpoch` registration:
 // Reader thread setup
 let local_epoch = reader.register_reader();
 
-// All read operations require the LocalEpoch
-let guard = reader.read(&local_epoch);
-let result = reader.map(&local_epoch, |v| process(v));
+// All read operations require a PinGuard
+let guard = local_epoch.pin();
+let val = reader.read(&guard);
 ```
 
 **Benefits**:
@@ -603,9 +634,8 @@ Choose optimization strategies based on workload characteristics:
 
 ### Guard Mechanism
 
-- `SwapGuard<'a, T>` holds a `PinGuard<'a>` to maintain the epoch pin state
-- Provides transparent access to the value via `Deref` trait
-- Lifetime `'a` is tied to the `PinGuard`, enforced by Rust's borrow checker
+- `PinGuard<'a>` maintains the epoch pin state
+- `read` returns `&'a T` which is tied to the lifetime of `PinGuard`
 - Ensures value cannot be accessed after guard is dropped
 - `PinGuard` supports `Clone` for nested pinning (increments `pin_count`)
 

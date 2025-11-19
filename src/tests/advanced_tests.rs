@@ -57,13 +57,16 @@ fn test_reader_filter() {
     let (mut swapper, reader) = new(10);
     let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(&reader_epoch, |x| *x > 5);
-    assert!(guard.is_some());
-    assert_eq!(*guard.unwrap(), 10);
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |x| *x > 5);
+    assert!(val.is_some());
+    assert_eq!(*val.unwrap(), 10);
+    drop(guard);
 
     swapper.update(3);
-    let guard = reader.filter(&reader_epoch, |x| x > &5);
-    assert!(guard.is_none());
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |x| x > &5);
+    assert!(val.is_none());
 }
 
 /// Test reader filter with strings
@@ -73,13 +76,16 @@ fn test_reader_filter_string() {
     let (mut swapper, reader) = new(String::from("hello"));
     let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(&reader_epoch, |s| s.len() > 3);
-    assert!(guard.is_some());
-    assert_eq!(*guard.unwrap(), "hello");
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |s| s.len() > 3);
+    assert!(val.is_some());
+    assert_eq!(*val.unwrap(), "hello");
+    drop(guard);
 
     swapper.update(String::from("hi"));
-    let guard = reader.filter(&reader_epoch, |s| s.len() > 3);
-    assert!(guard.is_none());
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |s| s.len() > 3);
+    assert!(val.is_none());
 }
 
 /// Test reader filter with vectors
@@ -89,13 +95,16 @@ fn test_reader_filter_vector() {
     let (mut swapper, reader) = new(vec![1, 2, 3, 4, 5]);
     let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(&reader_epoch, |v| v.len() > 3);
-    assert!(guard.is_some());
-    assert_eq!(*guard.unwrap(), vec![1, 2, 3, 4, 5]);
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |v| v.len() > 3);
+    assert!(val.is_some());
+    assert_eq!(*val.unwrap(), vec![1, 2, 3, 4, 5]);
+    drop(guard);
 
     swapper.update(vec![1, 2]);
-    let guard = reader.filter(&reader_epoch, |v| v.len() > 3);
-    assert!(guard.is_none());
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |v| v.len() > 3);
+    assert!(val.is_none());
 }
 
 /// Test writer update_and_fetch operation
@@ -106,13 +115,21 @@ fn test_writer_update_and_fetch() {
     let writer_epoch = swapper.register_reader();
     let reader_epoch = reader.register_reader();
 
-    let guard = swapper.update_and_fetch(&writer_epoch, |x| x * 2);
-    assert_eq!(*guard, 20);
-    assert_eq!(*reader.read(&reader_epoch), 20);
+    let guard1 = writer_epoch.pin();
+    let val1 = swapper.update_and_fetch(&guard1, |x| x * 2);
+    assert_eq!(*val1, 20);
 
-    let guard = swapper.update_and_fetch(&writer_epoch, |x| x + 5);
-    assert_eq!(*guard, 25);
-    assert_eq!(*reader.read(&reader_epoch), 25);
+    let guard_reader1 = reader_epoch.pin();
+    assert_eq!(*reader.read(&guard_reader1), 20);
+    drop(guard1);
+    drop(guard_reader1);
+
+    let guard2 = writer_epoch.pin();
+    let val2 = swapper.update_and_fetch(&guard2, |x| x + 5);
+    assert_eq!(*val2, 25);
+
+    let guard_reader2 = reader_epoch.pin();
+    assert_eq!(*reader.read(&guard_reader2), 25);
 }
 
 /// Test writer update_and_fetch with strings
@@ -123,13 +140,21 @@ fn test_writer_update_and_fetch_string() {
     let writer_epoch = swapper.register_reader();
     let reader_epoch = reader.register_reader();
 
-    let guard = swapper.update_and_fetch(&writer_epoch, |s| s.to_uppercase());
-    assert_eq!(*guard, "HELLO");
-    assert_eq!(*reader.read(&reader_epoch), "HELLO");
+    let guard1 = writer_epoch.pin();
+    let val1 = swapper.update_and_fetch(&guard1, |s| s.to_uppercase());
+    assert_eq!(*val1, "HELLO");
 
-    let guard = swapper.update_and_fetch(&writer_epoch, |s| format!("{} world", s));
-    assert_eq!(*guard, "HELLO world");
-    assert_eq!(*reader.read(&reader_epoch), "HELLO world");
+    let guard_reader1 = reader_epoch.pin();
+    assert_eq!(*reader.read(&guard_reader1), "HELLO");
+    drop(guard1);
+    drop(guard_reader1);
+
+    let guard2 = writer_epoch.pin();
+    let val2 = swapper.update_and_fetch(&guard2, |s| format!("{} world", s));
+    assert_eq!(*val2, "HELLO world");
+
+    let guard_reader2 = reader_epoch.pin();
+    assert_eq!(*reader.read(&guard_reader2), "HELLO world");
 }
 
 /// Test writer update_and_fetch with vectors
@@ -140,13 +165,16 @@ fn test_writer_update_and_fetch_vector() {
     let writer_epoch = swapper.register_reader();
     let reader_epoch = reader.register_reader();
 
-    let guard = swapper.update_and_fetch(&writer_epoch, |v| {
+    let guard = writer_epoch.pin();
+    let val = swapper.update_and_fetch(&guard, |v| {
         let mut new_v = v.clone();
         new_v.push(4);
         new_v
     });
-    assert_eq!(&*guard, &vec![1, 2, 3, 4]);
-    assert_eq!(&*reader.read(&reader_epoch), &vec![1, 2, 3, 4]);
+    assert_eq!(&*val, &vec![1, 2, 3, 4]);
+
+    let guard_reader = reader_epoch.pin();
+    assert_eq!(&*reader.read(&guard_reader), &vec![1, 2, 3, 4]);
 }
 
 /// Test writer read capability
@@ -157,13 +185,17 @@ fn test_writer_read() {
     let writer_epoch = swapper.register_reader();
     let reader_epoch = reader.register_reader();
 
-    let guard = swapper.read(&writer_epoch);
-    assert_eq!(*guard, 42);
+    let guard = writer_epoch.pin();
+    let val = swapper.read(&guard);
+    assert_eq!(*val, 42);
     drop(guard);
 
     swapper.update(100);
-    assert_eq!(*swapper.read(&writer_epoch), 100);
-    assert_eq!(*reader.read(&reader_epoch), 100);
+    let guard_writer = writer_epoch.pin();
+    assert_eq!(*swapper.read(&guard_writer), 100);
+
+    let guard_reader = reader_epoch.pin();
+    assert_eq!(*reader.read(&guard_reader), 100);
 }
 
 /// Test writer read with strings
@@ -174,13 +206,17 @@ fn test_writer_read_string() {
     let writer_epoch = swapper.register_reader();
     let reader_epoch = reader.register_reader();
 
-    let guard = swapper.read(&writer_epoch);
-    assert_eq!(*guard, "test");
+    let guard = writer_epoch.pin();
+    let val = swapper.read(&guard);
+    assert_eq!(*val, "test");
     drop(guard);
 
     swapper.update(String::from("updated"));
-    assert_eq!(*swapper.read(&writer_epoch), "updated");
-    assert_eq!(*reader.read(&reader_epoch), "updated");
+    let guard_writer = writer_epoch.pin();
+    assert_eq!(*swapper.read(&guard_writer), "updated");
+
+    let guard_reader = reader_epoch.pin();
+    assert_eq!(*reader.read(&guard_reader), "updated");
 }
 
 /// Test chained operations
@@ -192,13 +228,18 @@ fn test_chained_operations() {
 
     // Chain: read -> filter -> map
     // 链式：read -> filter -> map
-    let guard = reader.read(&reader_epoch);
-    let result = if *guard > 5 { *guard * 2 } else { 0 };
+    // Chain: read -> filter -> map
+    // 链式：read -> filter -> map
+    let guard = reader_epoch.pin();
+    let val = reader.read(&guard);
+    let result = if *val > 5 { *val * 2 } else { 0 };
     assert_eq!(result, 20);
+    drop(guard);
 
     swapper.update(5);
-    let guard = reader.read(&reader_epoch);
-    let result = if *guard > 5 { *guard * 2 } else { 0 };
+    let guard = reader_epoch.pin();
+    let val = reader.read(&guard);
+    let result = if *val > 5 { *val * 2 } else { 0 };
     assert_eq!(result, 0); // Value is 5, which is not > 5
 }
 
@@ -208,14 +249,15 @@ fn test_chained_operations() {
 fn test_multiple_operations_same_guard() {
     let (_swapper, reader) = new(vec![1, 2, 3, 4, 5]);
     let reader_epoch = reader.register_reader();
-    let guard = reader.read(&reader_epoch);
+    let guard = reader_epoch.pin();
+    let val = reader.read(&guard);
 
     // Multiple operations on the same guard
     // 在同一 guard 上的多个操作
-    assert_eq!(guard.len(), 5);
-    assert_eq!(guard.iter().sum::<i32>(), 15);
-    assert!(guard.contains(&3));
-    assert_eq!(guard[0], 1);
+    assert_eq!(val.len(), 5);
+    assert_eq!(val.iter().sum::<i32>(), 15);
+    assert!(val.contains(&3));
+    assert_eq!(val[0], 1);
 }
 
 /// Test map with complex transformation
@@ -242,12 +284,15 @@ fn test_filter_complex_condition() {
     let (mut swapper, reader) = new(String::from("hello"));
     let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(&reader_epoch, |s| s.len() > 3 && s.contains('l'));
-    assert!(guard.is_some());
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |s| s.len() > 3 && s.contains('l'));
+    assert!(val.is_some());
+    drop(guard);
 
     swapper.update(String::from("hi"));
-    let guard = reader.filter(&reader_epoch, |s| s.len() > 3 && s.contains('l'));
-    assert!(guard.is_none());
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |s| s.len() > 3 && s.contains('l'));
+    assert!(val.is_none());
 }
 
 /// Test update_and_fetch with side effects
@@ -259,7 +304,8 @@ fn test_update_and_fetch_side_effects() {
     let reader_epoch = reader.register_reader();
 
     let mut call_count = 0;
-    let guard = swapper.update_and_fetch(&writer_epoch, |v| {
+    let guard = writer_epoch.pin();
+    let val = swapper.update_and_fetch(&guard, |v| {
         call_count += 1;
         let mut new_v = v.clone();
         new_v.push(4);
@@ -267,8 +313,10 @@ fn test_update_and_fetch_side_effects() {
     });
 
     assert_eq!(call_count, 1);
-    assert_eq!(&*guard, &vec![1, 2, 3, 4]);
-    assert_eq!(&*reader.read(&reader_epoch), &vec![1, 2, 3, 4]);
+    assert_eq!(&*val, &vec![1, 2, 3, 4]);
+
+    let guard_reader = reader_epoch.pin();
+    assert_eq!(&*reader.read(&guard_reader), &vec![1, 2, 3, 4]);
 }
 
 /// Test map returns None for empty option
@@ -295,9 +343,10 @@ fn test_filter_always_true() {
     let (_swapper, reader) = new(42);
     let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(&reader_epoch, |_| true);
-    assert!(guard.is_some());
-    assert_eq!(*guard.unwrap(), 42);
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |_| true);
+    assert!(val.is_some());
+    assert_eq!(*val.unwrap(), 42);
 }
 
 /// Test filter with always-false condition
@@ -307,6 +356,7 @@ fn test_filter_always_false() {
     let (_swapper, reader) = new(42);
     let reader_epoch = reader.register_reader();
 
-    let guard = reader.filter(&reader_epoch, |_| false);
-    assert!(guard.is_none());
+    let guard = reader_epoch.pin();
+    let val = reader.filter(&guard, |_| false);
+    assert!(val.is_none());
 }
