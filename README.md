@@ -1,16 +1,16 @@
-# SMR-Swap: Lock-Free Single-Writer Multiple-Reader Swap Container
+# SMR-Swap: Minimal-Locking Single-Writer Multiple-Reader Swap Container
 
 [![Crates.io](https://img.shields.io/crates/v/smr-swap)](https://crates.io/crates/smr-swap)
 [![Documentation](https://docs.rs/smr-swap/badge.svg)](https://docs.rs/smr-swap)
 [![License](https://img.shields.io/crates/l/smr-swap)](LICENSE-MIT)
 
-A high-performance, lock-free Rust library for safely sharing mutable data between a single writer and multiple readers using epoch-based memory reclamation.
+A high-performance, minimal-locking Rust library for safely sharing mutable data between a single writer and multiple readers using epoch-based memory reclamation.
 
 [中文文档](README_CN.md) | [English](README.md)
 
 ## Features
 
-- **Lock-Free**: No mutexes or locks required for reads or writes
+- **Minimal-Locking**: Read operations are wait-free; write operations only require locks during garbage collection
 - **High Performance**: Optimized for both read and write operations
 - **Single-Writer Multiple-Reader Pattern**: Type-safe enforcement via `Swapper<T>` and `SwapReader<T>`
 - **Memory Safe**: Uses epoch-based reclamation (via `swmr-epoch`) to prevent use-after-free
@@ -237,92 +237,105 @@ Comprehensive benchmark results comparing SMR-Swap against `arc-swap` on modern 
 
 | Scenario | SMR-Swap | ArcSwap | Improvement | Notes |
 |----------|----------|---------|-------------|-------|
-| Single-Thread Read | 0.90 ns | 9.24 ns | **99% faster** | Pure read performance |
-| Single-Thread Write | 112.78 ns | 127.28 ns | **11% faster** | Improved epoch management |
-| Multi-Thread Read (2) | 0.95 ns | 9.26 ns | **99% faster** | No contention |
-| Multi-Thread Read (4) | 0.90 ns | 9.64 ns | **99% faster** | Consistent scaling |
-| Multi-Thread Read (8) | 0.98 ns | 9.80 ns | **99% faster** | Excellent scaling |
-| Mixed R/W (2 readers) | 111.44 ns | 453.11 ns | **75% faster** | 1 writer + 2 readers |
-| Mixed R/W (4 readers) | 112.35 ns | 452.34 ns | **75% faster** | 1 writer + 4 readers |
-| Mixed R/W (8 readers) | 113.08 ns | 533.86 ns | **79% faster** | 1 writer + 8 readers |
-| Batch Read | 1.63 ns | 10.10 ns | **84% faster** | Optimized batch reads |
-| Read with Held Guard | 112.68 ns | 526.53 ns | **79% faster** | Reader holds guard during write |
-| Read Under Memory Pressure | 703 ns | 764.69 ns | **8% faster** | Aggressive GC collection |
+| Single-Thread Read | 0.90 ns | 8.96 ns | **90% faster** | Pure read performance |
+| Single-Thread Write | 87.90 ns | 130.23 ns | **32% faster** | Improved epoch management |
+| Multi-Thread Read (2) | 0.90 ns | 9.37 ns | **90% faster** | No contention |
+| Multi-Thread Read (4) | 0.91 ns | 9.33 ns | **90% faster** | Consistent scaling |
+| Multi-Thread Read (8) | 0.93 ns | 9.63 ns | **90% faster** | Excellent scaling |
+| Mixed R/W (2 readers) | 93.21 ns | 446.45 ns | **79% faster** | 1 writer + 2 readers |
+| Mixed R/W (4 readers) | 92.89 ns | 451.09 ns | **79% faster** | 1 writer + 4 readers |
+| Mixed R/W (8 readers) | 93.85 ns | 493.12 ns | **81% faster** | 1 writer + 8 readers |
+| Batch Read | 1.62 ns | 9.91 ns | **84% faster** | Optimized batch reads |
+| Multi-Writer (4 readers) | 629.63 ns | 1.92 µs | **67% faster** | 4 writers + 4 readers (Mutex) |
+| Multi-Writer (8 readers) | 640.33 ns | 2.23 µs | **71% faster** | 4 writers + 8 readers (Mutex) |
+| Multi-Writer (16 readers) | 626.57 ns | 2.85 µs | **78% faster** | 4 writers + 16 readers (Mutex) |
+| Read with Held Guard | 89.91 ns | 908.69 ns | **90% faster** | Reader holds guard during write |
+| Read Under Memory Pressure | 741.47 ns | 1.58 µs | **53% faster** | Aggressive GC collection |
 
 ### Detailed Performance Analysis
 
 #### Single-Thread Read
 ```
 smr-swap:  0.90 ns █
-arc-swap:  9.24 ns ██████████
+arc-swap:  8.96 ns ██████████
 ```
-**Winner**: SMR-Swap (99% faster)
+**Winner**: SMR-Swap (90% faster)
 - Extremely fast read path with minimal overhead
 - Direct pointer access without atomic operations
 - Near-nanosecond latency
 
 #### Single-Thread Write
 ```
-smr-swap:  112.78 ns ████████████
-arc-swap:  127.28 ns █████████████
+smr-swap:  87.90 ns ████████
+arc-swap:  130.23 ns █████████████
 ```
-**Winner**: SMR-Swap (11% faster)
+**Winner**: SMR-Swap (32% faster)
 - Improved epoch management efficiency
-- Both show excellent write performance
+- Excellent write performance despite GC overhead
 
 #### Multi-Thread Read Performance (Scaling)
 ```
 Readers:   2         4         8
-smr-swap:  0.95 ns   0.90 ns   0.98 ns
-arc-swap:  9.26 ns   9.64 ns   9.80 ns
+smr-swap:  0.90 ns   0.91 ns   0.93 ns
+arc-swap:  9.37 ns   9.33 ns   9.63 ns
 ```
 **Analysis**: 
 - SMR-Swap maintains near-constant sub-nanosecond time regardless of thread count
-- 99% faster than arc-swap across all thread counts
+- 90% faster than arc-swap across all thread counts
 - Excellent scaling characteristics with virtually no contention
 
 #### Mixed Read-Write (Most Realistic Scenario)
 ```
 Readers:   2         4         8
-smr-swap:  111 ns    112 ns    113 ns
-arc-swap:  453 ns    452 ns    534 ns
+smr-swap:  93 ns     93 ns     94 ns
+arc-swap:  446 ns    451 ns    493 ns
 ```
-**Winner**: SMR-Swap (75-79% faster)
-- Consistent performance under load (111-113 ns across all thread counts)
+**Winner**: SMR-Swap (79-81% faster)
+- Consistent performance under load (93-94 ns across all thread counts)
 - Minimal impact from concurrent writers
-- ArcSwap shows increased latency with more readers (up to 534 ns with 8 readers)
-- Aggressive GC ensures stable performance even with frequent writes
+- ArcSwap shows increased latency with more readers (up to 493 ns)
+- Aggressive GC ensures stable performance
+
+#### Multi-Writer Multi-Reader Performance
+```
+Config:    4W+4R     4W+8R     4W+16R
+smr-swap:  0.63 µs   0.64 µs   0.63 µs
+arc-swap:  1.92 µs   2.23 µs   2.85 µs
+```
+**Winner**: SMR-Swap (67-78% faster)
+- Even though SMR-Swap requires a `Mutex` to support multiple writers, it still significantly outperforms ArcSwap
+- ArcSwap write latency increases noticeably as reader count grows
+- Demonstrates the efficiency of SMR-Swap's core mechanism
 
 #### Read Under Memory Pressure
 ```
-smr-swap:  703 ns   ████
-arc-swap:  764.69 ns █████
+smr-swap:  741 ns   ████
+arc-swap:  1580 ns  █████████
 ```
-**Winner**: SMR-Swap (8% faster)
-- Aggressive garbage collection in `update()` prevents garbage accumulation
+**Winner**: SMR-Swap (53% faster)
+- **Improved**: Aggressive garbage collection prevents garbage accumulation
 - Epoch-based reclamation is triggered immediately after each write
 - Consistent performance even under memory pressure
-- Trade-off: slightly higher write latency for predictable read performance
 
 #### Read Latency with Held Guard
 ```
-smr-swap:  113.31 ns ████
-arc-swap:  490.02 ns ███████████████
+smr-swap:  89.91 ns  ████
+arc-swap:  908.69 ns ██████████████████
 ```
-**Winner**: SMR-Swap (77% faster)
+**Winner**: SMR-Swap (90% faster)
 - Minimal overhead when readers hold guards
 - Critical for applications requiring long-lived read access
 
 ### Performance Recommendations
 
 **Use SMR-Swap when:**
-- Read performance is critical (up to 99% faster reads)
-- Multiple readers need to hold guards for extended periods (79% faster)
-- Mixed read-write patterns are common (75-79% faster)
+- Read performance is critical (up to 90% faster reads)
+- Multiple readers need to hold guards for extended periods (90% faster)
+- Mixed read-write patterns are common (79-81% faster)
 - Consistent low-latency reads are required under all conditions
-- You need predictable performance even under memory pressure
+- Predictable performance under memory pressure is needed (53% faster)
 - Sub-nanosecond read latency is required
-- You can tolerate slightly higher write latency for better read performance
+- Higher write throughput than ArcSwap is desired (32% faster)
 
 **Use ArcSwap when:**
 - You need the absolute simplest implementation
@@ -407,9 +420,9 @@ SMR-Swap uses a custom `swmr-epoch` library for memory reclamation, optimized fo
    - Automatic cleanup of dead readers during collection cycles
 
 **Performance Characteristics**:
-- Single-thread read: 99% faster than arc-swap (minimal atomic operations)
-- Single-thread write: 11% faster than arc-swap (direct ownership, no Mutex overhead)
-- Multi-thread read: 99% faster than arc-swap (efficient epoch tracking)
+- Single-thread read: 90% faster than arc-swap (minimal atomic operations)
+- Single-thread write: 32% faster than arc-swap (direct ownership, no Mutex overhead)
+- Multi-thread read: 90% faster than arc-swap (efficient epoch tracking)
 - Automatic reclamation prevents unbounded garbage accumulation
 
 **Optimization Suggestions**:
@@ -431,15 +444,15 @@ Both `Swapper<T>` and `SwapReader<T>` implement `Send + Sync` when `T: 'static`,
 ## Comparison with Alternatives
 
 ### vs. `arc-swap`
-- **Advantages**: Better read performance, especially with held guards
-- **Disadvantages**: Slightly higher write latency due to epoch management
+- **Advantages**: 90% faster reads, 32% faster writes, 90% faster writes when guards are held
+- **Disadvantages**: Writes trigger GC, API requires explicit LocalEpoch management
 
 ### vs. `RwLock<T>`
-- **Advantages**: Lock-free, no contention, better for read-heavy workloads
+- **Advantages**: Wait-free reads, no contention, better for read-heavy workloads
 - **Disadvantages**: Only supports single writer
 
 ### vs. `Mutex<T>`
-- **Advantages**: Lock-free, no blocking, better performance
+- **Advantages**: Wait-free reads, no blocking, better performance
 - **Disadvantages**: Single writer only
 
 ## Safety
@@ -486,32 +499,32 @@ Benchmarks cover typical workloads for single-writer multiple-reader systems:
 ### Key Findings
 
 **Read Performance**:
-- Via `EpochPtr` and `PinGuard` mechanism, SMR-Swap is **99% faster** than arc-swap on reads
+- Via `EpochPtr` and `PinGuard` mechanism, SMR-Swap is **90% faster** than arc-swap on reads
 - Single-thread read achieves **0.90 ns**, approaching hardware limits
 - Multi-thread reads maintain consistent sub-nanosecond latency with no contention
 
 **Write Performance**:
-- Single-thread write is **11% faster** than arc-swap (108.94 ns vs 130.87 ns)
+- Single-thread write is **32% faster** than arc-swap (87.90 ns vs 130.23 ns)
 - Benefits from `VecDeque` garbage management and aggressive GC collection
-- Mixed workload write latency is stable (111-113 ns) with immediate GC
+- Mixed workload write latency is stable (92-94 ns) with immediate GC
 - Aggressive GC in `update()` ensures predictable performance
 
 **Scalability**:
 - Performance remains stable as reader count increases, with no contention
-- Multi-thread reads maintain 0.90-0.98 ns across 2/4/8 threads
-- Mixed read-write scenarios show SMR-Swap is **75-79% faster** than arc-swap
-- Performance improves with aggressive GC strategy
+- Multi-thread reads maintain 0.90-0.93 ns across 2/4/8 threads
+- Mixed read-write scenarios show SMR-Swap is **79-81% faster** than arc-swap
+- Even in multi-writer scenarios (requiring Mutex), performance is **67-78% faster** than arc-swap
 
 **Guard Holding**:
-- When readers hold guards, SMR-Swap write latency is much lower than arc-swap (112.68 ns vs 526.53 ns)
-- **79% faster** than arc-swap in this critical scenario
+- When readers hold guards, SMR-Swap write latency is much lower than arc-swap (89.91 ns vs 908.69 ns)
+- **90% faster** than arc-swap in this critical scenario
 - Essential for applications requiring long-lived read access
 
 **Memory Pressure**:
-- **Improved**: SMR-Swap is now **8% faster** than arc-swap under memory pressure (703 ns vs 764.69 ns)
+- **Improved**: SMR-Swap is now **53% faster** than arc-swap under memory pressure (741.47 ns vs 1580 ns)
 - Aggressive garbage collection in `update()` prevents garbage accumulation
 - Epoch-based reclamation is triggered immediately after each write
-- Trade-off: slightly higher write latency for predictable read performance under all conditions
+- Read performance remains stable even under high write frequency
 
 ## Use Cases
 
@@ -536,7 +549,7 @@ SMR-Swap is particularly well-suited for scenarios where read performance is cri
   - Suitable for: A/B testing, canary deployments
 
 - **Performance-Critical Read Paths**: Systems requiring minimal read latency
-  - Advantage: Sub-nanosecond read latency, 99% faster than arc-swap
+  - Advantage: Sub-nanosecond read latency, 90% faster than arc-swap
   - Suitable for: High-frequency trading, real-time data processing
 
 ### Less Suitable Scenarios
