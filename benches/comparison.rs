@@ -1,6 +1,6 @@
 use arc_swap::ArcSwap;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use smr_swap;
+use smr_swap::SmrSwap;
 use std::hint::black_box;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -14,12 +14,11 @@ fn bench_single_thread_read(c: &mut Criterion) {
 
     // SMR-Swap 单线程读取
     group.bench_function("smr_swap", |b| {
-        let (_swapper, reader) = smr_swap::new(vec![1; 1000]);
-        let local_epoch = reader.register_reader();
+        let swap = SmrSwap::new(vec![1; 1000]);
+        let reader = swap.reader();
         b.iter(|| {
-            let guard = local_epoch.pin();
-            let val = reader.read(&guard);
-            black_box(&*val);
+            let guard = reader.load();
+            black_box(&*guard);
         });
     });
 
@@ -44,11 +43,11 @@ fn bench_single_thread_write(c: &mut Criterion) {
 
     // SMR-Swap 单线程写入
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, _reader) = smr_swap::new(vec![1; 1000]);
+        let mut swap = SmrSwap::new(vec![1; 1000]);
         let mut counter = 0;
         b.iter(|| {
             counter += 1;
-            swapper.update(vec![counter; 1000]);
+            swap.update(vec![counter; 1000]);
         });
     });
 
@@ -79,19 +78,21 @@ fn bench_multi_thread_read(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (_swapper, reader) = smr_swap::new(vec![1; 1000]);
-                    let reader = Arc::new(reader);
+                    let swap = SmrSwap::new(vec![1; 1000]);
+                    let reader = swap.reader();
+
+                    let mut readers = Vec::with_capacity(num_readers);
+                    for _ in 0..num_readers {
+                        readers.push(reader.fork());
+                    }
 
                     let start = std::time::Instant::now();
                     thread::scope(|s| {
-                        for _ in 0..num_readers {
-                            let reader_clone = reader.clone();
+                        for reader in readers {
                             s.spawn(move || {
-                                let local_epoch = reader_clone.register_reader();
                                 for _ in 0..iters {
-                                    let guard = local_epoch.pin();
-                                    let val = reader_clone.read(&guard);
-                                    black_box(&*val);
+                                    let guard = reader.load();
+                                    black_box(&*guard);
                                 }
                             });
                         }
@@ -144,27 +145,28 @@ fn bench_mixed_read_write(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (mut swapper, reader) = smr_swap::new(vec![1; 1000]);
-                    let reader = Arc::new(reader);
+                    let (mut swapper, reader) = SmrSwap::new(vec![1; 1000]).into_components();
+
+                    let mut readers = Vec::with_capacity(num_readers);
+                    for _ in 0..num_readers {
+                        readers.push(reader.fork());
+                    }
 
                     let start = std::time::Instant::now();
                     thread::scope(|s| {
                         // 写入者线程
-                        s.spawn(|| {
+                        s.spawn(move || {
                             for i in 0..iters {
                                 swapper.update(vec![i as u32; 1000]);
                             }
                         });
 
                         // 读取者线程
-                        for _ in 0..num_readers {
-                            let reader_clone = reader.clone();
+                        for reader in readers {
                             s.spawn(move || {
-                                let local_epoch = reader_clone.register_reader();
                                 for _ in 0..iters {
-                                    let guard = local_epoch.pin();
-                                    let val = reader_clone.read(&guard);
-                                    black_box(&*val);
+                                    let guard = reader.load();
+                                    black_box(&*guard);
                                 }
                             });
                         }
@@ -228,9 +230,13 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (swapper, reader) = smr_swap::new(vec![1; 1000]);
+                    let (swapper, reader) = SmrSwap::new(vec![1; 1000]).into_components();
                     let swapper = Arc::new(Mutex::new(swapper));
-                    let reader = Arc::new(reader);
+
+                    let mut readers = Vec::with_capacity(num_readers);
+                    for _ in 0..num_readers {
+                        readers.push(reader.fork());
+                    }
 
                     let start = std::time::Instant::now();
                     thread::scope(|s| {
@@ -245,14 +251,11 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
                         }
 
                         // 读取者线程
-                        for _ in 0..num_readers {
-                            let reader_clone = reader.clone();
+                        for reader in readers {
                             s.spawn(move || {
-                                let local_epoch = reader_clone.register_reader();
                                 for _ in 0..iters {
-                                    let guard = local_epoch.pin();
-                                    let val = reader_clone.read(&guard);
-                                    black_box(&*val);
+                                    let guard = reader.load();
+                                    black_box(&*guard);
                                 }
                             });
                         }
@@ -347,21 +350,18 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
 
     // SMR-Swap: 读取者持有守卫，写入者写入
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, reader) = smr_swap::new(vec![1; 1000]);
-        let reader = Arc::new(reader);
+        let (mut swapper, reader) = SmrSwap::new(vec![1; 1000]).into_components();
 
         b.iter_custom(|iters| {
             let start = std::time::Instant::now();
             thread::scope(|s| {
-                let reader_clone = reader.clone();
+                let reader_for_thread = reader.fork();
                 s.spawn(move || {
-                    let local_epoch = reader_clone.register_reader();
                     // 读取者持有守卫
-                    let guard = local_epoch.pin();
-                    let _val = reader_clone.read(&guard);
+                    let _guard = reader_for_thread.load();
                     // 模拟长时间持有
                     std::thread::sleep(std::time::Duration::from_micros(10));
-                    drop(guard);
+                    drop(_guard);
                 });
 
                 // 写入者尝试写入
@@ -409,22 +409,24 @@ fn bench_batch_read(c: &mut Criterion) {
 
     // SMR-Swap: 批量读取（单个 pin 内多次读取）
     group.bench_function("smr_swap_batch", |b| {
-        let (_swapper, reader) = smr_swap::new(vec![1; 1000]);
-        let reader = Arc::new(reader);
+        let swap = SmrSwap::new(vec![1; 1000]);
+        let reader = swap.reader();
 
         b.iter_custom(|iters| {
+            let mut readers = Vec::with_capacity(4);
+            for _ in 0..4 {
+                readers.push(reader.fork());
+            }
+
             let start = std::time::Instant::now();
             thread::scope(|s| {
-                for _ in 0..4 {
-                    let reader_clone = reader.clone();
+                for reader in readers {
                     s.spawn(move || {
-                        let local_epoch = reader_clone.register_reader();
                         for _ in 0..iters {
                             // 批量读取：一个 pin 内多次读取
-                            let guard = local_epoch.pin();
-                            let val = reader_clone.read(&guard);
+                            let guard = reader.load();
                             for _ in 0..10 {
-                                black_box(&*val);
+                                black_box(&*guard);
                             }
                         }
                     });
@@ -470,8 +472,7 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
 
     // SMR-Swap: 频繁写入导致内存压力
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, reader) = smr_swap::new(vec![0; 10000]);
-        let reader = Arc::new(reader);
+        let (mut swapper, reader) = SmrSwap::new(vec![0; 10000]).into_components();
 
         // 预先进行大量写入以积累垃圾
         for i in 0..1000 {
@@ -479,15 +480,14 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
         }
 
         b.iter_custom(|iters| {
+            let reader_for_thread = reader.fork();
+
             let start = std::time::Instant::now();
             thread::scope(|s| {
-                let reader_clone = reader.clone();
                 s.spawn(move || {
-                    let local_epoch = reader_clone.register_reader();
                     for _ in 0..iters {
-                        let guard = local_epoch.pin();
-                        let val = reader_clone.read(&guard);
-                        black_box(&*val);
+                        let guard = reader_for_thread.load();
+                        black_box(&*guard);
                     }
                 });
 

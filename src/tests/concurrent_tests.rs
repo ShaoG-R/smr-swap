@@ -3,7 +3,7 @@
 //! Tests concurrent behavior with multiple readers and writers,
 //! stress tests, and race condition handling
 
-use crate::new;
+use crate::SmrSwap;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
@@ -11,7 +11,8 @@ use std::thread;
 /// 并发读写的压力测试
 #[test]
 fn test_concurrent_stress() {
-    let (mut swapper, reader) = new(Box::new(0));
+    let swap = SmrSwap::new(Box::new(0));
+    let (mut swapper, reader) = swap.into_components();
     let num_updates = 1000;
     let num_readers = 4;
 
@@ -23,29 +24,27 @@ fn test_concurrent_stress() {
         });
 
         for _ in 0..num_readers {
-            let reader_clone = reader.clone();
+            let reader_for_thread = reader.fork();
             s.spawn(move || {
-                let reader_epoch = reader_clone.register_reader();
                 for _ in 0..10000 {
-                    let guard = reader_epoch.pin();
-                    let val = reader_clone.read(&guard);
-                    let val = **val;
+                    let guard = reader_for_thread.load();
+                    let val = **guard;
                     assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
         }
     });
 
-    let reader_epoch = reader.register_reader();
-    let guard = reader_epoch.pin();
-    assert_eq!(**reader.read(&guard), num_updates);
+    let guard = reader.load();
+    assert_eq!(**guard, num_updates);
 }
 
 /// Test concurrent readers with multiple updates
 /// 测试多个读取者与多个更新的并发
 #[test]
 fn test_concurrent_multiple_readers() {
-    let (mut swapper, reader) = new(0);
+    let swap = SmrSwap::new(0);
+    let (mut swapper, reader) = swap.into_components();
     let num_readers = 8;
     let num_updates = 100;
 
@@ -57,13 +56,11 @@ fn test_concurrent_multiple_readers() {
         });
 
         for _ in 0..num_readers {
-            let reader_clone = reader.clone();
+            let reader_for_thread = reader.fork();
             s.spawn(move || {
-                let reader_epoch = reader_clone.register_reader();
                 for _ in 0..1000 {
-                    let guard = reader_epoch.pin();
-                    let val = reader_clone.read(&guard);
-                    let val = *val;
+                    let guard = reader_for_thread.load();
+                    let val = *guard;
                     assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
@@ -75,8 +72,9 @@ fn test_concurrent_multiple_readers() {
 /// 测试 drop 行为和竞态中的 None 返回
 #[test]
 fn test_drop_behavior_and_none() {
-    let (swapper, reader) = new(10);
-    let reader_clone = reader.clone();
+    let swap = SmrSwap::new(10);
+    let (swapper, reader) = swap.into_components();
+    let reader_clone = reader.fork();
 
     let barrier = Arc::new(Barrier::new(3));
 
@@ -95,10 +93,8 @@ fn test_drop_behavior_and_none() {
     let b3 = barrier.clone();
     let h_reader2 = thread::spawn(move || {
         b3.wait();
-        let reader_epoch = reader_clone.register_reader();
-        let guard = reader_epoch.pin();
-        let val = reader_clone.read(&guard);
-        assert_eq!(*val, 10);
+        let guard = reader_clone.load();
+        assert_eq!(*guard, 10);
         drop(guard);
         drop(reader_clone);
     });
@@ -109,21 +105,20 @@ fn test_drop_behavior_and_none() {
 
     // Test race condition between read() and drop()
     // 测试 read() 和 drop() 之间的竞态
-    let (swapper, reader) = new(10);
+    let swap = SmrSwap::new(10);
+    let (swapper, reader) = swap.into_components();
     drop(swapper);
 
     thread::scope(|s| {
-        let reader_clone = reader.clone();
+        let reader_clone = reader.fork();
         s.spawn(move || {
             drop(reader_clone);
         });
 
         s.spawn(move || {
-            let reader_epoch = reader.register_reader();
             for _ in 0..1000 {
-                let guard = reader_epoch.pin();
-                let val = reader.read(&guard);
-                assert_eq!(*val, 10);
+                let guard = reader.load();
+                assert_eq!(*guard, 10);
             }
         });
     });
@@ -133,7 +128,8 @@ fn test_drop_behavior_and_none() {
 /// 测试并发读取者持有 guard
 #[test]
 fn test_concurrent_readers_with_held_guards() {
-    let (mut swapper, reader) = new(0);
+    let swap = SmrSwap::new(0);
+    let (mut swapper, reader) = swap.into_components();
     let num_readers = 4;
     let num_updates = 50;
 
@@ -145,16 +141,13 @@ fn test_concurrent_readers_with_held_guards() {
         });
 
         for _ in 0..num_readers {
-            let reader_clone = reader.clone();
+            let reader_for_thread = reader.fork();
             s.spawn(move || {
-                let reader_epoch = reader_clone.register_reader();
                 // Hold multiple guards concurrently
                 // 并发持有多个 guard
-                let guard1_pin = reader_epoch.pin();
-                let guard1 = reader_clone.read(&guard1_pin);
+                let guard1 = reader_for_thread.load();
                 thread::sleep(std::time::Duration::from_millis(5));
-                let guard2_pin = reader_epoch.pin();
-                let guard2 = reader_clone.read(&guard2_pin);
+                let guard2 = reader_for_thread.load();
 
                 // Both guards should be valid
                 // 两个 guard 都应该有效
@@ -168,7 +161,8 @@ fn test_concurrent_readers_with_held_guards() {
 /// 测试读取者在写入者更新时持有 guard
 #[test]
 fn test_reader_holds_guard_during_updates() {
-    let (mut swapper, reader) = new(0);
+    let swap = SmrSwap::new(0);
+    let (mut swapper, reader) = swap.into_components();
     let num_updates = 50;
     // 引入 Barrier，需要同步 2 个线程
     let barrier = Arc::new(Barrier::new(2));
@@ -185,11 +179,9 @@ fn test_reader_holds_guard_during_updates() {
 
         let b_reader = barrier.clone();
         s.spawn(move || {
-            let reader_epoch = reader.register_reader();
             // Hold a guard for a while
             // 持有 guard 一段时间
-            let guard_pin = reader_epoch.pin();
-            let guard = reader.read(&guard_pin);
+            let guard = reader.load();
             let initial_value = *guard;
 
             thread::sleep(std::time::Duration::from_millis(10));
@@ -208,7 +200,8 @@ fn test_reader_holds_guard_during_updates() {
 /// 测试许多并发读取者与频繁的更新
 #[test]
 fn test_many_concurrent_readers_frequent_updates() {
-    let (mut swapper, reader) = new(0);
+    let swap = SmrSwap::new(0);
+    let (mut swapper, reader) = swap.into_components();
     let num_readers = 16;
     let num_updates = 200;
 
@@ -220,29 +213,27 @@ fn test_many_concurrent_readers_frequent_updates() {
         });
 
         for _ in 0..num_readers {
-            let reader_clone = reader.clone();
+            let reader_for_thread = reader.fork();
             s.spawn(move || {
-                let reader_epoch = reader_clone.register_reader();
                 for _ in 0..5000 {
-                    let guard = reader_epoch.pin();
-                    let val = reader_clone.read(&guard);
-                    let val = *val;
+                    let guard = reader_for_thread.load();
+                    let val = *guard;
                     assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
         }
     });
 
-    let reader_epoch = reader.register_reader();
-    let guard = reader_epoch.pin();
-    assert_eq!(*reader.read(&guard), num_updates);
+    let guard = reader.load();
+    assert_eq!(*guard, num_updates);
 }
 
 /// Test rapid reader creation and cloning
 /// 测试快速读取者创建和克隆
 #[test]
 fn test_rapid_reader_creation() {
-    let (mut swapper, reader) = new(0);
+    let swap = SmrSwap::new(0);
+    let (mut swapper, reader) = swap.into_components();
 
     thread::scope(|s| {
         s.spawn(move || {
@@ -253,13 +244,11 @@ fn test_rapid_reader_creation() {
         });
 
         for _ in 0..10 {
-            let reader_clone = reader.clone();
+            let reader_for_thread = reader.fork();
             s.spawn(move || {
-                let reader_epoch = reader_clone.register_reader();
                 for _ in 0..1000 {
-                    let guard = reader_epoch.pin();
-                    let val = reader_clone.read(&guard);
-                    let _ = *val;
+                    let guard = reader_for_thread.load();
+                    let _ = *guard;
                 }
             });
         }
@@ -270,7 +259,8 @@ fn test_rapid_reader_creation() {
 /// 测试并发更新中的读取者一致性
 #[test]
 fn test_reader_consistency_concurrent_updates() {
-    let (mut swapper, reader) = new(vec![0]);
+    let swap = SmrSwap::new(vec![0]);
+    let (mut swapper, reader) = swap.into_components();
     let num_updates = 100;
 
     thread::scope(|s| {
@@ -281,16 +271,14 @@ fn test_reader_consistency_concurrent_updates() {
         });
 
         for _ in 0..4 {
-            let reader_clone = reader.clone();
+            let reader_for_thread = reader.fork();
             s.spawn(move || {
-                let reader_epoch = reader_clone.register_reader();
                 for _ in 0..1000 {
                     // Each read should return a valid vector with a single element
                     // 每次读取都应返回一个有效的向量，包含单个元素
-                    let guard = reader_epoch.pin();
-                    let val = reader_clone.read(&guard);
-                    assert_eq!(val.len(), 1);
-                    let val = val[0];
+                    let guard = reader_for_thread.load();
+                    assert_eq!(guard.len(), 1);
+                    let val = guard[0];
                     assert!(val <= num_updates, "Read invalid value: {}", val);
                 }
             });
@@ -302,7 +290,8 @@ fn test_reader_consistency_concurrent_updates() {
 /// 测试使用 barrier 的同步
 #[test]
 fn test_synchronization_with_barrier() {
-    let (mut swapper, reader) = new(0);
+    let swap = SmrSwap::new(0);
+    let (mut swapper, reader) = swap.into_components();
     let barrier = Arc::new(Barrier::new(5));
 
     thread::scope(|s| {
@@ -315,15 +304,13 @@ fn test_synchronization_with_barrier() {
         });
 
         for _ in 0..4 {
-            let reader_clone = reader.clone();
+            let reader_for_thread = reader.fork();
             let b = barrier.clone();
             s.spawn(move || {
-                let reader_epoch = reader_clone.register_reader();
                 b.wait();
                 for _ in 0..1000 {
-                    let guard = reader_epoch.pin();
-                    let val = reader_clone.read(&guard);
-                    let _ = *val;
+                    let guard = reader_for_thread.load();
+                    let _ = *guard;
                 }
             });
         }

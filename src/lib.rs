@@ -1,4 +1,4 @@
-//! A lock-free, epoch-based concurrent swap library.
+//! A minimal locking, epoch-based concurrent swap library.
 //!
 //! This library provides a mechanism to swap values atomically while allowing concurrent readers
 //! to access the old value until they are done. It relies on `swmr-epoch` for epoch-based garbage collection.
@@ -6,21 +6,20 @@
 //! # Example
 //!
 //! ```rust
-//! use smr_swap::new;
+//! use smr_swap::SmrSwap;
 //! use std::thread;
 //!
-//! let (mut swapper, reader) = new(0);
-//!
-//! // Writer updates the value
-//! swapper.update(1);
+//! let mut swap = SmrSwap::new(0);
 //!
 //! // Reader reads the value
-//! let reader_clone = reader.clone();
+//! let reader = swap.reader().fork();
+//!
+//! // Writer updates the value
+//! swap.update(1);
+//!
 //! let handle = thread::spawn(move || {
-//!     let local_epoch = reader_clone.register_reader();
-//!     let guard = local_epoch.pin();
-//!     let val = reader_clone.read(&guard);
-//!     assert_eq!(*val, 1);
+//!     let guard = reader.load();
+//!     assert_eq!(*guard, 1);
 //! });
 //!
 //! handle.join().unwrap();
@@ -32,107 +31,120 @@ use loom::sync::Arc;
 use std::sync::Arc;
 pub use swmr_epoch::{EpochGcDomain, EpochPtr, GcHandle, LocalEpoch, PinGuard};
 
-/// Internal shared state
-///
-/// 内部共享状态
-pub struct SwapState<T> {
-    // Current version pointer, the version seen by readers
-    // 当前版本指针，读取者看到的版本
-    pub(crate) current: EpochPtr<T>,
-    // GC domain for managing garbage collection
-    // 用于管理垃圾回收的 GC 域
-    pub(crate) domain: EpochGcDomain,
-}
-
 /// Writer type, not cloneable
 ///
 /// 写入者类型，不可Clone
 pub struct Swapper<T> {
-    inner: Arc<SwapState<T>>,
+    current: Arc<EpochPtr<T>>,
     // Garbage collector handle, held directly by Swapper
     // 垃圾回收器句柄，由 Swapper 直接持有
     gc: GcHandle,
 }
 
-/// Reader type, cloneable
+/// Reader type, not cloneable (use fork() to create a new reader for another thread)
 ///
-/// 读取者类型，可Clone
-#[derive(Clone)]
+/// 读取者类型，不可Clone（使用 fork() 为另一个线程创建新的读取者）
 pub struct SwapReader<T> {
-    inner: Arc<SwapState<T>>,
+    current: Arc<EpochPtr<T>>,
+    domain: EpochGcDomain,
+    epoch: LocalEpoch,
 }
 
-/// Create a new SMR container, returning a (Swapper, SwapReader) tuple
+/// Main entry point for the SMR swap library
 ///
-/// 创建新的SMR容器，返回(Swapper, SwapReader)元组
-pub fn new<T: 'static>(initial: T) -> (Swapper<T>, SwapReader<T>) {
-    // Create the epoch GC domain
-    // 创建 epoch GC 域
-    let (gc, domain) = EpochGcDomain::builder()
-        .auto_reclaim_threshold(None)
-        .cleanup_interval(2)
-        .build();
-
-    let inner = Arc::new(SwapState {
-        current: EpochPtr::new(initial),
-        domain: domain.clone(),
-    });
-
-    let swapper = Swapper {
-        inner: inner.clone(),
-        gc,
-    };
-
-    let reader = SwapReader { inner };
-
-    (swapper, reader)
+/// SMR swap 库的主入口点
+pub struct SmrSwap<T> {
+    swapper: Swapper<T>,
+    reader: SwapReader<T>,
 }
 
-impl<T: 'static> Swapper<T> {
+/// RAII guard for reading values
+///
+/// 用于读取值的 RAII 守卫
+pub struct ReaderGuard<'a, T> {
+    _guard: PinGuard<'a>,
+    ptr: *const T,
+}
+
+impl<'a, T> std::ops::Deref for ReaderGuard<'a, T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &T {
+        // SAFETY: The data is protected by `guard` which is held in this struct.
+        // The pointer was obtained from a valid load protected by a pin that is still active (via `guard`).
+        unsafe { &*self.ptr }
+    }
+}
+
+impl<T: 'static> SmrSwap<T> {
+    /// Create a new SMR container
+    ///
+    /// 创建新的SMR容器
+    #[inline]
+    pub fn new(initial: T) -> Self {
+        // Create the epoch GC domain
+        // 创建 epoch GC 域
+        let (gc, domain) = EpochGcDomain::builder()
+            .auto_reclaim_threshold(None)
+            .cleanup_interval(2)
+            .build();
+
+        let current = Arc::new(EpochPtr::new(initial));
+
+        let swapper = Swapper {
+            current: current.clone(),
+            gc,
+        };
+
+        let reader_epoch = domain.register_reader();
+        let reader = SwapReader {
+            current,
+            domain,
+            epoch: reader_epoch,
+        };
+
+        Self { swapper, reader }
+    }
+
+    /// Get a reference to the inner Swapper
+    ///
+    /// 获取内部 Swapper 的引用
+    #[inline]
+    pub fn swapper(&mut self) -> &mut Swapper<T> {
+        &mut self.swapper
+    }
+
+    /// Get a reference to the inner SwapReader
+    ///
+    /// 获取内部 SwapReader 的引用
+    #[inline]
+    pub fn reader(&self) -> &SwapReader<T> {
+        &self.reader
+    }
+
+    /// Split into Swapper and SwapReader
+    ///
+    /// 拆分为 Swapper 和 SwapReader
+    #[inline]
+    pub fn into_components(self) -> (Swapper<T>, SwapReader<T>) {
+        (self.swapper, self.reader)
+    }
+
     /// Perform a write operation to update the current version
     ///
     /// 执行写入操作，更新当前版本
     #[inline]
     pub fn update(&mut self, new_value: T) {
-        // Store the new value and retire the old one
-        // 存储新值并退休旧值
-        self.inner.current.store(new_value, &mut self.gc);
-
-        // Trigger garbage collection
-        // 触发垃圾回收
-        self.gc.collect();
+        self.swapper.update(new_value);
     }
 
-    /// Get a read-only reference to the current value
+    /// Read the current version (lock-free) with RAII guard
     ///
-    /// This is a convenience method that allows writers to also read the current value.
-    /// The writer must provide a PinGuard to ensure the value is not reclaimed.
-    ///
-    /// 获取当前值的只读引用
-    ///
-    /// 这是一个便利方法，允许写入者也能读取当前值。
-    /// 写入者必须提供 PinGuard 来确保值不会被回收。
+    /// 使用 RAII 守卫读取当前版本（无锁）
     #[inline]
-    pub fn read<'a>(&self, guard: &'a PinGuard) -> &'a T {
-        self.inner.current.load(guard)
-    }
-
-    /// Apply a closure function to the current value and transform the result
-    ///
-    /// This method reads the current value, applies the closure to transform it,
-    /// and returns the transformed result. The guard is automatically released after transformation.
-    ///
-    /// 对当前值应用闭包函数并转换结果
-    ///
-    /// 这个方法读取当前值，应用闭包进行转换，并返回转换后的结果
-    /// guard在转换后自动释放
-    #[inline]
-    pub fn map<F, U>(&self, local_epoch: &LocalEpoch, f: F) -> U
-    where
-        F: FnOnce(&T) -> U,
-    {
-        let guard = local_epoch.pin();
-        f(self.read(&guard))
+    pub fn load(&self) -> ReaderGuard<'_, T> {
+        self.reader.load()
     }
 
     /// Apply a closure function to the current value and return the result
@@ -145,143 +157,149 @@ impl<T: 'static> Swapper<T> {
     /// 闭包接收当前值的引用，返回新值
     /// 返回新值的引用
     #[inline]
-    pub fn update_and_fetch<'a, F>(&mut self, guard: &'a PinGuard, f: F) -> &'a T
+    pub fn update_and_fetch<F>(&mut self, f: F) -> ReaderGuard<'_, T>
     where
         F: FnOnce(&T) -> T,
     {
-        let old_val = self.read(guard);
+        let guard = self.reader.epoch.pin();
+        let old_val = self.reader.current.load(&guard);
         let new_value = f(old_val);
-        self.update(new_value);
-
-        // Trigger garbage collection
-        // 触发垃圾回收
-        self.gc.collect();
-
-        self.read(guard)
-    }
-
-    /// Register a new reader for the current thread
-    ///
-    /// Returns a `LocalEpoch` that should be stored per-thread.
-    /// The caller is responsible for ensuring that each `LocalEpoch` is used
-    /// by only one thread.
-    ///
-    /// 为当前线程注册一个新的读者
-    ///
-    /// 返回一个应该在每个线程中存储的 `LocalEpoch`。
-    /// 调用者有责任确保每个 `LocalEpoch` 仅由一个线程使用。
-    #[inline]
-    pub fn register_reader(&self) -> LocalEpoch {
-        self.inner.domain.register_reader()
+        self.swapper.update(new_value);
+        let ptr = self.reader.current.load(&guard) as *const T;
+        ReaderGuard { _guard: guard, ptr }
     }
 }
 
-impl<T: 'static> Swapper<Arc<T>> {
+impl<T: 'static> SmrSwap<Arc<T>> {
     /// Atomically swap the current Arc value with a new one
     ///
-    /// This method replaces the current Arc-wrapped value with a new one and returns the old value.
-    ///
     /// 原子地将当前 Arc 值与新值交换
-    ///
-    /// 这个方法用新的 Arc 包装值替换当前值，并返回旧值
     #[inline]
-    pub fn swap(&mut self, local_epoch: &LocalEpoch, new_value: Arc<T>) -> Arc<T> {
+    pub fn swap(&mut self, new_value: Arc<T>) -> Arc<T> {
         // Read the current value before swapping
         // 在交换前读取当前值
-        let guard = local_epoch.pin();
-        let old_value = self.inner.current.load(&guard).clone();
+        let guard = self.reader.epoch.pin();
+        let old_value = self.reader.current.load(&guard).clone();
         drop(guard);
 
-        // Store the new value and retire the old one
-        // 存储新值并退休旧值
-        self.inner.current.store(new_value, &mut self.gc);
+        self.swapper.update(new_value);
 
         old_value
     }
 
     /// Apply a closure function to the current value and return the result as an Arc
     ///
-    /// This method reads the current value, passes it to the closure which returns a new value,
-    /// then wraps the new value in an Arc and swaps it with the current value.
-    /// Returns the new Arc value.
-    ///
     /// 对当前值应用闭包函数并将结果作为 Arc 返回
-    ///
-    /// 这个方法读取当前值，将其传递给闭包（闭包返回新值），
-    /// 然后将新值包装在 Arc 中并与当前值交换
-    /// 返回新的 Arc 值
     #[inline]
-    pub fn update_and_fetch_arc<F>(&mut self, local_epoch: &LocalEpoch, f: F) -> Arc<T>
+    pub fn update_and_fetch_arc<F>(&mut self, f: F) -> Arc<T>
     where
         F: FnOnce(&Arc<T>) -> Arc<T>,
     {
-        let guard = local_epoch.pin();
-        let current = self.read(&guard);
+        let guard = self.reader.epoch.pin();
+        let current = self.reader.current.load(&guard);
         let new_value = f(current);
         drop(guard);
-        self.swap(local_epoch, new_value.clone());
+        self.swapper.update(new_value.clone());
         new_value
     }
 }
 
-impl<T: 'static> SwapReader<T> {
-    /// Read the current version (lock-free)
+impl<T: 'static> Swapper<T> {
+    /// Perform a write operation to update the current version
     ///
-    /// Returns a reference to the current version.
-    /// The reader must provide a PinGuard to ensure the version will not be reclaimed while in use.
-    ///
-    /// 读取当前版本（无锁）
-    ///
-    /// 返回当前版本的引用
-    /// 读取者必须提供 PinGuard 来确保在使用期间版本不会被回收
+    /// 执行写入操作，更新当前版本
     #[inline]
-    pub fn read<'a>(&self, guard: &'a PinGuard) -> &'a T {
-        self.inner.current.load(guard)
+    pub fn update(&mut self, new_value: T) {
+        // Store the new value and retire the old one
+        // 存储新值并退休旧值
+        self.current.store(new_value, &mut self.gc);
+
+        // Trigger garbage collection
+        // 触发垃圾回收
+        self.gc.collect();
+    }
+}
+
+impl<T: 'static> SwapReader<T> {
+    /// Create a new reader for the current thread
+    ///
+    /// This replaces `Clone`. Since `LocalEpoch` is thread-local, we must register a new one
+    /// when creating a reader for a new thread.
+    ///
+    /// 为当前线程创建一个新的读取者
+    ///
+    /// 这替代了 `Clone`。由于 `LocalEpoch` 是线程本地的，我们在为新线程创建读取者时必须注册一个新的。
+    #[inline]
+    pub fn fork(&self) -> Self {
+        Self {
+            current: self.current.clone(),
+            domain: self.domain.clone(),
+            epoch: self.domain.register_reader(),
+        }
+    }
+
+    /// Read the current version (lock-free) with RAII guard
+    ///
+    /// Returns a `ReaderGuard` that holds the pin and the reference.
+    /// The pin is automatically released when the guard is dropped.
+    ///
+    /// 使用 RAII 守卫读取当前版本（无锁）
+    ///
+    /// 返回一个持有 pin 和引用的 `ReaderGuard`。
+    /// 当守卫被 drop 时，pin 会自动释放。
+    /// Read the current version (lock-free) with RAII guard
+    ///
+    /// Returns a `ReaderGuard` that holds the pin and the reference.
+    /// The pin is automatically released when the guard is dropped.
+    ///
+    /// 使用 RAII 守卫读取当前版本（无锁）
+    ///
+    /// 返回一个持有 pin 和引用的 `ReaderGuard`。
+    /// 当守卫被 drop 时，pin 会自动释放。
+    #[inline]
+    pub fn load(&self) -> ReaderGuard<'_, T> {
+        let _guard = self.epoch.pin();
+        let ptr = self.current.load(&_guard) as *const T;
+        ReaderGuard { _guard, ptr }
     }
 
     /// Apply a closure function to the current value and transform the result
     ///
     /// This method reads the current value, applies the closure to transform it,
-    /// and returns the transformed result. The guard is automatically released after transformation.
+    /// and returns the transformed result.
     ///
     /// 对当前值应用闭包函数并转换结果
     ///
     /// 这个方法读取当前值，应用闭包进行转换，并返回转换后的结果
-    /// guard在转换后自动释放
     #[inline]
-    pub fn map<'a, F, U>(&self, local_epoch: &'a LocalEpoch, f: F) -> U
+    pub fn map<F, U>(&self, f: F) -> U
     where
         F: FnOnce(&T) -> U,
     {
-        let guard = local_epoch.pin();
-        f(self.read(&guard))
+        let guard = self.epoch.pin();
+        f(self.current.load(&guard))
     }
 
     /// Apply a closure function to the current value, returning Some if the closure returns true, otherwise None
     ///
     /// 对当前值应用闭包函数，如果闭包返回 true 则返回 Some，否则返回 None
     #[inline]
-    pub fn filter<'a, F>(&self, guard: &'a PinGuard, f: F) -> Option<&'a T>
+    pub fn filter<F>(&self, f: F) -> Option<ReaderGuard<'_, T>>
     where
         F: FnOnce(&T) -> bool,
     {
-        let val = self.read(guard);
-        if f(val) { Some(val) } else { None }
-    }
+        let _guard = self.epoch.pin();
 
-    /// Register a new reader for the current thread
-    ///
-    /// Returns a `LocalEpoch` that should be stored per-thread.
-    /// The caller is responsible for ensuring that each `LocalEpoch` is used
-    /// by only one thread.
-    ///
-    /// 为当前线程注册一个新的读者
-    ///
-    /// 返回一个应该在每个线程中存储的 `LocalEpoch`。
-    /// 调用者有责任确保每个 `LocalEpoch` 仅由一个线程使用。
-    #[inline]
-    pub fn register_reader(&self) -> LocalEpoch {
-        self.inner.domain.register_reader()
+        // Use a block to limit the scope of the borrow
+        let ptr = {
+            let val = self.current.load(&_guard);
+            if !f(val) {
+                return None;
+            }
+            val as *const T
+        };
+
+        Some(ReaderGuard { _guard, ptr })
     }
 }
 
