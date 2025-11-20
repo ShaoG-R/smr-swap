@@ -24,6 +24,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
+name = "antidote"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34fde25430d87a9388dadbe6e34d7f72a462c8b43ac8d309b42b0a8505d7e2a5"
+
+[[package]]
 name = "arc-swap"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -590,7 +596,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smr-swap"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "arc-swap",
  "criterion",
@@ -611,10 +617,11 @@ dependencies = [
 
 [[package]]
 name = "swmr-epoch"
-version = "0.3.8"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b28a66a58cf1360801e37c3b202926d2847f6bcd8b5901db0185685b27f2906e"
+checksum = "68963e551d802a3e26ae4a56b1e18679a9eca3cb54313733bb46926a09dfb7f5"
 dependencies = [
+ "antidote",
  "loom",
 ]
 
