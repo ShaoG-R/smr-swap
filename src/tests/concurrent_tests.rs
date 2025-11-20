@@ -43,8 +43,7 @@ fn test_concurrent_stress() {
 /// 测试多个读取者与多个更新的并发
 #[test]
 fn test_concurrent_multiple_readers() {
-    let swap = SmrSwap::new(0);
-    let (mut swapper, reader) = swap.into_components();
+    let (mut swapper, reader) = crate::new_smr_pair(0);
     let num_readers = 8;
     let num_updates = 100;
 
@@ -128,8 +127,7 @@ fn test_drop_behavior_and_none() {
 /// 测试并发读取者持有 guard
 #[test]
 fn test_concurrent_readers_with_held_guards() {
-    let swap = SmrSwap::new(0);
-    let (mut swapper, reader) = swap.into_components();
+    let (mut swapper, reader) = crate::new_smr_pair(0);
     let num_readers = 4;
     let num_updates = 50;
 
@@ -161,8 +159,7 @@ fn test_concurrent_readers_with_held_guards() {
 /// 测试读取者在写入者更新时持有 guard
 #[test]
 fn test_reader_holds_guard_during_updates() {
-    let swap = SmrSwap::new(0);
-    let (mut swapper, reader) = swap.into_components();
+    let (mut swapper, reader) = crate::new_smr_pair(0);
     let num_updates = 50;
     // 引入 Barrier，需要同步 2 个线程
     let barrier = Arc::new(Barrier::new(2));
@@ -200,8 +197,7 @@ fn test_reader_holds_guard_during_updates() {
 /// 测试许多并发读取者与频繁的更新
 #[test]
 fn test_many_concurrent_readers_frequent_updates() {
-    let swap = SmrSwap::new(0);
-    let (mut swapper, reader) = swap.into_components();
+    let (mut swapper, reader) = crate::new_smr_pair(0);
     let num_readers = 16;
     let num_updates = 200;
 
@@ -232,8 +228,7 @@ fn test_many_concurrent_readers_frequent_updates() {
 /// 测试快速读取者创建和克隆
 #[test]
 fn test_rapid_reader_creation() {
-    let swap = SmrSwap::new(0);
-    let (mut swapper, reader) = swap.into_components();
+    let (mut swapper, reader) = crate::new_smr_pair(0);
 
     thread::scope(|s| {
         s.spawn(move || {
@@ -290,8 +285,7 @@ fn test_reader_consistency_concurrent_updates() {
 /// 测试使用 barrier 的同步
 #[test]
 fn test_synchronization_with_barrier() {
-    let swap = SmrSwap::new(0);
-    let (mut swapper, reader) = swap.into_components();
+    let (mut swapper, reader) = crate::new_smr_pair(0);
     let barrier = Arc::new(Barrier::new(5));
 
     thread::scope(|s| {

@@ -85,8 +85,12 @@ You can split the container into independent components:
 use smr_swap::SmrSwap;
 
 fn main() {
+    // Option 1: Create SmrSwap first, then split
     let swap = SmrSwap::new(42);
     let (mut swapper, reader) = swap.into_components();
+    
+    // Option 2: Create components directly
+    let (mut swapper, reader) = smr_swap::new_smr_pair(42);
     
     // Pass `swapper` to writer thread
     // Pass `reader` to reader threads (use reader.fork() for each thread)
@@ -94,6 +98,9 @@ fn main() {
 ```
 
 ## API Overview
+
+### Global Functions
+- `new_smr_pair<T>(initial: T) -> (Swapper<T>, SwapReader<T>)`: Create a new pair of Swapper and SwapReader directly.
 
 ### `SmrSwap<T>`
 The main entry point. Holds both the writer and a reader.

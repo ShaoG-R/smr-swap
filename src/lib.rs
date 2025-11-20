@@ -77,33 +77,42 @@ impl<'a, T> std::ops::Deref for ReaderGuard<'a, T> {
     }
 }
 
+/// Create a new pair of Swapper and SwapReader
+///
+/// 创建一对新的 Swapper 和 SwapReader
+#[inline]
+pub fn new_smr_pair<T: 'static>(initial: T) -> (Swapper<T>, SwapReader<T>) {
+    // Create the epoch GC domain
+    // 创建 epoch GC 域
+    let (gc, domain) = EpochGcDomain::builder()
+        .auto_reclaim_threshold(None)
+        .cleanup_interval(2)
+        .build();
+
+    let current = Arc::new(EpochPtr::new(initial));
+
+    let swapper = Swapper {
+        current: current.clone(),
+        gc,
+    };
+
+    let reader_epoch = domain.register_reader();
+    let reader = SwapReader {
+        current,
+        domain,
+        epoch: reader_epoch,
+    };
+
+    (swapper, reader)
+}
+
 impl<T: 'static> SmrSwap<T> {
     /// Create a new SMR container
     ///
     /// 创建新的SMR容器
     #[inline]
     pub fn new(initial: T) -> Self {
-        // Create the epoch GC domain
-        // 创建 epoch GC 域
-        let (gc, domain) = EpochGcDomain::builder()
-            .auto_reclaim_threshold(None)
-            .cleanup_interval(2)
-            .build();
-
-        let current = Arc::new(EpochPtr::new(initial));
-
-        let swapper = Swapper {
-            current: current.clone(),
-            gc,
-        };
-
-        let reader_epoch = domain.register_reader();
-        let reader = SwapReader {
-            current,
-            domain,
-            epoch: reader_epoch,
-        };
-
+        let (swapper, reader) = new_smr_pair(initial);
         Self { swapper, reader }
     }
 

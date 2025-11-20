@@ -85,8 +85,12 @@ fn main() {
 use smr_swap::SmrSwap;
 
 fn main() {
+    // 方式 1: 先创建 SmrSwap，然后拆分
     let swap = SmrSwap::new(42);
     let (mut swapper, reader) = swap.into_components();
+    
+    // 方式 2: 直接创建组件
+    let (mut swapper, reader) = smr_swap::new_smr_pair(42);
     
     // 将 `swapper` 传递给写入线程
     // 将 `reader` 传递给读取线程（每个线程使用 reader.fork()）
@@ -94,6 +98,9 @@ fn main() {
 ```
 
 ## API 概览
+
+### 全局函数
+- `new_smr_pair<T>(initial: T) -> (Swapper<T>, SwapReader<T>)`: 直接创建一对 Swapper 和 SwapReader。
 
 ### `SmrSwap<T>`
 主入口点。持有写入者和读取者。

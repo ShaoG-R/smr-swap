@@ -145,7 +145,7 @@ fn bench_mixed_read_write(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (mut swapper, reader) = SmrSwap::new(vec![1; 1000]).into_components();
+                    let (mut swapper, reader) = smr_swap::new_smr_pair(vec![1; 1000]);
 
                     let mut readers = Vec::with_capacity(num_readers);
                     for _ in 0..num_readers {
@@ -230,7 +230,7 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (swapper, reader) = SmrSwap::new(vec![1; 1000]).into_components();
+                    let (swapper, reader) = smr_swap::new_smr_pair(vec![1; 1000]);
                     let swapper = Arc::new(Mutex::new(swapper));
 
                     let mut readers = Vec::with_capacity(num_readers);
@@ -350,7 +350,7 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
 
     // SMR-Swap: 读取者持有守卫，写入者写入
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, reader) = SmrSwap::new(vec![1; 1000]).into_components();
+        let (mut swapper, reader) = smr_swap::new_smr_pair(vec![1; 1000]);
 
         b.iter_custom(|iters| {
             let start = std::time::Instant::now();
@@ -472,7 +472,7 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
 
     // SMR-Swap: 频繁写入导致内存压力
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, reader) = SmrSwap::new(vec![0; 10000]).into_components();
+        let (mut swapper, reader) = smr_swap::new_smr_pair(vec![0; 10000]);
 
         // 预先进行大量写入以积累垃圾
         for i in 0..1000 {
