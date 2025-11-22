@@ -596,7 +596,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smr-swap"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "arc-swap",
  "criterion",
@@ -617,9 +617,9 @@ dependencies = [
 
 [[package]]
 name = "swmr-epoch"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8705fe23dd4043fad7645391b17d3f8628d1fc42fb6f3eb57532d5fe0769606f"
+checksum = "f46e4baeebeafc0deec46c3c39055deafbf1dfccba27385905633d01bcb00736"
 dependencies = [
  "antidote",
  "loom",

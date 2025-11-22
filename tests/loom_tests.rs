@@ -1,11 +1,12 @@
 //! Loom-based concurrency tests for smr-swap
 //!
-//! Run with: `RUSTFLAGS="--cfg loom" cargo test --test loom_tests --features loom --release`
+//! Run with: `cargo test --features loom --test loom_tests`
 
-#![cfg(loom)]
+#![cfg(feature = "loom")]
 
 use loom::sync::Arc;
 use loom::thread;
+use loom::model::Builder;
 use smr_swap::SmrSwap;
 
 /// Test: Basic update and read concurrency
@@ -144,7 +145,9 @@ fn loom_filter() {
 /// Test: Concurrent Readers
 #[test]
 fn loom_concurrent_readers() {
-    loom::model(|| {
+    let mut builder = Builder::new();
+    builder.preemption_bound = Some(3);
+    builder.check(|| {
         let mut swap = SmrSwap::new(0);
         let mut handles = vec![];
 

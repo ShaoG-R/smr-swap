@@ -25,9 +25,9 @@
 //! handle.join().unwrap();
 //! ```
 
-#[cfg(loom)]
+#[cfg(feature = "loom")]
 use loom::sync::Arc;
-#[cfg(not(loom))]
+#[cfg(not(feature = "loom"))]
 use std::sync::Arc;
 pub use swmr_epoch::{EpochGcDomain, EpochPtr, GcHandle, LocalEpoch, PinGuard};
 

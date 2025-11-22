@@ -1,6 +1,6 @@
 [package]
 name = "smr-swap"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 authors = ["ShaoG <shaog.rs@gmail.com>"]
 description = "A minimal-locking, high-performance Single-Writer Multiple-Reader swap container using epoch-based memory reclamation"
@@ -20,11 +20,8 @@ tokio = { version = "1.48", features = ["full"] }
 loom = ["dep:loom", "swmr-epoch/loom"]
 
 [dependencies]
-swmr-epoch = { version = "0.3.10" }
+swmr-epoch = { version = "0.3.11" }
 loom = { version = "0.7", optional = true }
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [[bench]]
 name = "comparison"
