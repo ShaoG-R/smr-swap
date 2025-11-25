@@ -312,9 +312,5 @@ impl<T: 'static> SwapReader<T> {
     }
 }
 
-// SAFETY: Swapper<T> is Send when T is Send + 'static
-// SAFETY: Swapper<T>是Send当T是Send + 'static
-unsafe impl<T: Send + 'static> Send for Swapper<T> {}
-
 #[cfg(test)]
 mod tests;

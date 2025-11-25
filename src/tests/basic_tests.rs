@@ -219,7 +219,9 @@ fn test_send_sync_compilation<'a>() {
     // fn assert_sync<T: Sync>() {} // SwapReader is !Sync
 
     assert_send::<Swapper<i32>>();
+    assert_send::<Swapper<*mut i32>>();
     assert_send::<SwapReader<i32>>();
+    assert_send::<SwapReader<*mut i32>>();
     // assert_sync::<SwapReader<i32>>();
 
     assert_send::<SwapReader<&'a i32>>();
