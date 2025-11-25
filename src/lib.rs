@@ -76,7 +76,6 @@ pub struct ReaderHandle<T> {
 /// SMR swap 库的主入口点
 pub struct SmrSwap<T> {
     swapper: Swapper<T>,
-    reader: SwapReader<T>,
     handle: ReaderHandle<T>,
 }
 
@@ -131,7 +130,7 @@ impl<T: 'static> SmrSwap<T> {
     pub fn new(initial: T) -> Self {
         let (swapper, reader) = new_smr_pair(initial);
         let handle = reader.handle();
-        Self { swapper, reader, handle }
+        Self { swapper, handle }
     }
 
     /// Get a reference to the inner Swapper
@@ -147,7 +146,7 @@ impl<T: 'static> SmrSwap<T> {
     /// 获取内部 SwapReader 的引用（Send + Sync）
     #[inline]
     pub fn reader(&self) -> &SwapReader<T> {
-        &self.reader
+        &self.handle.reader
     }
 
     /// Get a reference to the internal ReaderHandle for direct reading
@@ -260,10 +259,7 @@ impl<T: 'static> SwapReader<T> {
     #[inline]
     pub fn handle(&self) -> ReaderHandle<T> {
         ReaderHandle {
-            reader: Self {
-                current: self.current.clone(),
-                domain: self.domain.clone(),
-            },
+            reader: self.clone(),
             epoch: self.domain.register_reader(),
         }
     }

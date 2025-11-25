@@ -1,6 +1,6 @@
 [package]
 name = "smr-swap"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 authors = ["ShaoG <shaog.rs@gmail.com>"]
 description = "A minimal-locking, high-performance Single-Writer Multiple-Reader swap container using epoch-based memory reclamation"

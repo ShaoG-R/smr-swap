@@ -185,7 +185,7 @@ fn test_arc_update_and_fetch_arc_returns_arc() {
 #[test]
 fn test_arc_swap_shared_across_readers() {
     let mut swap = SmrSwap::new(Arc::new(String::from("v1")));
-    let reader1 = swap.reader().handle();
+    let reader1 = swap.handle().clone();
     let reader2 = reader1.clone();
 
     let old = swap.swap(Arc::new(String::from("v2")));
@@ -205,7 +205,7 @@ fn test_arc_swap_shared_across_readers() {
 #[test]
 fn test_arc_update_and_fetch_arc_shared() {
     let mut swap = SmrSwap::new(Arc::new(vec![1, 2, 3]));
-    let reader1 = swap.reader().handle();
+    let reader1 = swap.handle().clone();
     let reader2 = reader1.clone();
 
     let result = swap.update_and_fetch_arc(|v| {
@@ -237,7 +237,7 @@ fn test_arc_swap_complex_struct() {
         name: String::from("first"),
         values: vec![1, 2, 3],
     }));
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     let old = swap.swap(Arc::new(Data {
         id: 2,
@@ -267,7 +267,7 @@ fn test_arc_update_and_fetch_arc_complex_struct() {
         count: 0,
         label: String::from("initial"),
     }));
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     let result = swap.update_and_fetch_arc(|c| {
         Arc::new(Counter {

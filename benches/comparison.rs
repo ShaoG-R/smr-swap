@@ -15,7 +15,7 @@ fn bench_single_thread_read(c: &mut Criterion) {
     // SMR-Swap 单线程读取
     group.bench_function("smr_swap", |b| {
         let swap = SmrSwap::new(vec![1; 1000]);
-        let handle = swap.reader().handle();
+        let handle = swap.handle().clone();
         b.iter(|| {
             let guard = handle.load();
             black_box(&*guard);
@@ -79,11 +79,10 @@ fn bench_multi_thread_read(c: &mut Criterion) {
             |b, &num_readers| {
                 b.iter_custom(|iters| {
                     let swap = SmrSwap::new(vec![1; 1000]);
-                    let reader = swap.reader();
 
                     let mut readers = Vec::with_capacity(num_readers);
                     for _ in 0..num_readers {
-                        readers.push(reader.handle());
+                        readers.push(swap.handle().clone());
                     }
 
                     let start = std::time::Instant::now();
@@ -410,12 +409,11 @@ fn bench_batch_read(c: &mut Criterion) {
     // SMR-Swap: 批量读取（单个 pin 内多次读取）
     group.bench_function("smr_swap_batch", |b| {
         let swap = SmrSwap::new(vec![1; 1000]);
-        let reader = swap.reader().clone();
 
         b.iter_custom(|iters| {
             let mut handles = Vec::with_capacity(4);
             for _ in 0..4 {
-                handles.push(reader.handle());
+                handles.push(swap.handle().clone());
             }
 
             let start = std::time::Instant::now();

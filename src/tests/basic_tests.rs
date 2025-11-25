@@ -40,7 +40,7 @@ fn test_basic_new_and_read_vector() {
 #[test]
 fn test_basic_update_int() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     assert_eq!(*reader.load(), 10);
 
@@ -53,7 +53,7 @@ fn test_basic_update_int() {
 #[test]
 fn test_basic_update_string() {
     let mut swap = SmrSwap::new(String::from("hello"));
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     assert_eq!(*reader.load(), "hello");
 
@@ -66,7 +66,7 @@ fn test_basic_update_string() {
 #[test]
 fn test_multiple_updates() {
     let mut swap = SmrSwap::new(0);
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     for i in 1..=10 {
         swap.update(i);
@@ -79,7 +79,7 @@ fn test_multiple_updates() {
 #[test]
 fn test_reader_fork_int() {
     let mut swap = SmrSwap::new(10);
-    let reader1 = swap.reader().handle();
+    let reader1 = swap.handle().clone();
     let reader2 = reader1.clone();
 
     assert_eq!(*reader1.load(), 10);
@@ -96,7 +96,7 @@ fn test_reader_fork_int() {
 #[test]
 fn test_reader_fork_string() {
     let mut swap = SmrSwap::new(String::from("initial"));
-    let reader1 = swap.reader().handle();
+    let reader1 = swap.handle().clone();
     let reader2 = reader1.clone();
     let reader3 = reader2.clone();
 
@@ -116,7 +116,7 @@ fn test_reader_fork_string() {
 #[test]
 fn test_multiple_readers_consistency() {
     let mut swap = SmrSwap::new(0);
-    let reader1 = swap.reader().handle();
+    let reader1 = swap.handle().clone();
     let reader2 = reader1.clone();
     let reader3 = reader2.clone();
 
@@ -152,7 +152,7 @@ fn test_multiple_readers_consistency() {
 #[test]
 fn test_read_guard_holds_value() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     let guard1 = reader.load();
     assert_eq!(*guard1, 10);
@@ -178,7 +178,7 @@ fn test_read_guard_holds_value() {
 #[test]
 fn test_multiple_held_guards() {
     let mut swap = SmrSwap::new(0);
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     // Get multiple guards
     // 获取多个守卫
@@ -233,7 +233,7 @@ fn test_send_sync_compilation<'a>() {
 #[test]
 fn test_with_boxed_values() {
     let mut swap = SmrSwap::new(Box::new(42));
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     let guard = reader.load();
     assert_eq!(**guard, 42);
@@ -250,7 +250,7 @@ fn test_with_arc_values() {
     use std::sync::Arc;
 
     let mut swap = SmrSwap::new(Arc::new(42));
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     let guard1 = reader.load();
     assert_eq!(**guard1, 42);
@@ -265,7 +265,7 @@ fn test_with_arc_values() {
 #[test]
 fn test_map() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     // Map the value to a new type
     let doubled = reader.map(|val| *val * 2);
@@ -282,7 +282,7 @@ fn test_map() {
 #[test]
 fn test_filter() {
     let mut swap = SmrSwap::new(Some(42));
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     // Filter with Some
     let val = reader.filter(|val| val.is_some()).unwrap();
@@ -302,7 +302,7 @@ fn test_filter() {
 fn test_update_and_fetch() {
     let mut swap = SmrSwap::new(10);
 
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
 
     let guard = swap.update_and_fetch(|val| val + 5);
     assert_eq!(*guard, 15);
@@ -321,7 +321,7 @@ fn test_swap_arc() {
     let old = swap.swap(Arc::new(20));
     assert_eq!(*old, 10);
 
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
     assert_eq!(**reader.load(), 20);
 }
 
@@ -336,6 +336,6 @@ fn test_update_and_fetch_arc() {
 
     assert_eq!(*new_val, 15);
 
-    let reader = swap.reader().handle();
+    let reader = swap.handle().clone();
     assert_eq!(**reader.load(), 15);
 }
