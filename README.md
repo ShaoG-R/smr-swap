@@ -15,7 +15,7 @@ A high-performance, minimal-locking Rust library for safely sharing mutable data
 - **Single-Writer Multiple-Reader Pattern**: Type-safe enforcement via `Swapper<T>` and `SwapReader<T>`
 - **Memory Safe**: Uses epoch-based reclamation (via `swmr-epoch`) to prevent use-after-free
 - **Zero-Copy Reads**: Readers get direct references to the current value via RAII guards
-- **Concurrent**: Safe to use across multiple threads with `Send + Sync` bounds
+- **Thread Safe**: `SwapReader<T>` is `Send + Sync`, can be safely stored in structs and shared across threads
 
 ## Quick Start
 
@@ -25,7 +25,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-smr-swap = "0.5"
+smr-swap = "0.6"
 ```
 
 ### Basic Usage
@@ -35,67 +35,112 @@ use smr_swap::SmrSwap;
 use std::thread;
 
 fn main() {
-    // Create a new SMR container with initial value
+    // Create a new SMR container
     let mut swap = SmrSwap::new(vec![1, 2, 3]);
 
-    // Create a reader for a new thread (must use fork() for new threads)
-    let reader = swap.reader().fork();
+    // Get a shareable reader (Send + Sync)
+    let reader = swap.reader().clone();
 
     let handle = thread::spawn(move || {
-        // Read the value (lock-free)
-        let guard = reader.load();
+        // Create a thread-local handle to read
+        let local = reader.handle();
+        let guard = local.load();
         println!("Reader sees: {:?}", *guard);
     });
 
     // Writer updates the value
     swap.update(vec![4, 5, 6]);
     
-    // Main thread can also read
+    // Main thread reads directly
     println!("Main thread sees: {:?}", *swap.load());
 
     handle.join().unwrap();
 }
 ```
 
-### Using with Arc (for shared ownership)
+### Storing Reader in Structs
 
-While SMR-Swap works with any type `T`, you can wrap values in `Arc` for shared ownership:
+`SwapReader<T>` is `Send + Sync`, so it can be safely stored in structs:
 
 ```rust
-use smr_swap::SmrSwap;
-use std::sync::Arc;
+use smr_swap::{SmrSwap, SwapReader};
+use std::thread;
+
+struct MyService {
+    reader: SwapReader<Config>,
+}
+
+impl MyService {
+    fn get_config(&self) -> String {
+        // Create a thread-local handle to read
+        let handle = self.reader.handle();
+        handle.map(|config| config.name.clone())
+    }
+}
+
+struct Config {
+    name: String,
+}
 
 fn main() {
-    let mut swap = SmrSwap::new(Arc::new(vec![1, 2, 3]));
+    let (mut swapper, reader) = smr_swap::new_smr_pair(Config { name: "default".into() });
+    let service = MyService { reader };
     
-    // Update with a new Arc
-    swap.update(Arc::new(vec![4, 5, 6]));
-    
-    // Or use swap() to get the old value back
-    let old = swap.swap(Arc::new(vec![7, 8, 9]));
-    println!("Old value: {:?}", old);
+    // service can be safely shared across threads
+    thread::scope(|s| {
+        s.spawn(|| println!("{}", service.get_config()));
+        s.spawn(|| println!("{}", service.get_config()));
+    });
 }
 ```
 
 ### Separating Writer and Reader
 
-You can split the container into independent components:
-
 ```rust
-use smr_swap::SmrSwap;
+use std::thread;
 
 fn main() {
-    // Option 1: Create SmrSwap first, then split
-    let swap = SmrSwap::new(42);
-    let (mut swapper, reader) = swap.into_components();
-    
-    // Option 2: Create components directly
+    // Create Swapper and SwapReader pair directly
     let (mut swapper, reader) = smr_swap::new_smr_pair(42);
     
-    // Pass `swapper` to writer thread
-    // Pass `reader` to reader threads (use reader.fork() for each thread)
+    // reader is Send + Sync, can be cloned and passed to multiple threads
+    let reader_clone = reader.clone();
+    
+    thread::spawn(move || {
+        let handle = reader_clone.handle();
+        println!("Value: {}", *handle.load());
+    });
+    
+    // Writer updates the value
+    swapper.update(100);
 }
 ```
+
+## Core Concepts
+
+### Type Hierarchy
+
+| Type | Thread Safety | Role | Key Method |
+|------|---------------|------|------------|
+| `SwapReader<T>` | `Send + Sync` | Shareable reader, can be stored in structs | `handle()` |
+| `ReaderHandle<T>` | `Send` only | Thread-local handle for actual reads | `load()`, `map()`, `filter()` |
+
+```
+SwapReader  ──handle()──►  ReaderHandle  ──load()──►  ReaderGuard
+ (shared)                   (per-thread)              (RAII guard)
+```
+
+### Why This Design?
+
+1. **`SwapReader<T>`** is `Send + Sync`
+   - Can be safely stored in structs
+   - Can be shared across threads via `&SwapReader`
+   - Only exposes `handle()` method, cannot read directly
+
+2. **`ReaderHandle<T>`** is `Send` but not `Sync`
+   - Contains thread-local `LocalEpoch`
+   - Provides actual read methods: `load()`, `map()`, `filter()`
+   - Each thread needs its own `ReaderHandle`
 
 ## API Overview
 
@@ -103,20 +148,27 @@ fn main() {
 - `new_smr_pair<T>(initial: T) -> (Swapper<T>, SwapReader<T>)`: Create a new pair of Swapper and SwapReader directly.
 
 ### `SmrSwap<T>`
-The main entry point. Holds both the writer and a reader.
+The main entry point. Holds writer, reader, and internal handle.
 - `new(initial: T)`: Create a new container.
 - `update(new_value: T)`: Update the value.
-- `load()`: Read the current value.
-- `reader()`: Get a reference to the reader.
+- `load()`: Read the current value (uses internal handle).
+- `reader()`: Get `&SwapReader` (Send + Sync).
+- `handle()`: Get `&ReaderHandle` (for direct reading).
 - `swapper()`: Get a reference to the writer.
-- `into_components()`: Split into `Swapper` and `SwapReader`.
 
-### `SwapReader<T>`
-The reader component.
-- `fork()`: Create a new reader for a different thread. **Important**: `SwapReader` is not `Clone` to enforce explicit forking for thread-local epoch registration.
-- `load()`: Returns a `ReaderGuard` pointing to the current value.
-- `map(|v| ...)`: Apply a function to the value and return the result.
-- `filter(|v| ...)`: Conditionally return a guard.
+### `SwapReader<T>` (Send + Sync)
+Shareable reader that can be stored in structs.
+- `handle() -> ReaderHandle<T>`: Create a thread-local read handle.
+- `clone()`: Clone the reader (implements `Clone`).
+
+### `ReaderHandle<T>` (!Sync)
+Thread-local read handle.
+- `load() -> ReaderGuard<T>`: Returns a guard pointing to the current value.
+- `map<F, U>(f: F) -> U`: Apply a function to the value and return the result.
+- `filter<F>(f: F) -> Option<ReaderGuard<T>>`: Conditionally return a guard.
+- `handle() -> ReaderHandle<T>`: Create a new handle.
+- `reader() -> &SwapReader<T>`: Get a reference to the inner `SwapReader`.
+- `clone()`: Clone the handle (implements `Clone`).
 
 ### `Swapper<T>`
 The writer component.
@@ -225,14 +277,19 @@ arc-swap:  908.69 ns ██████████████████
 
 ### Type System Guarantees
 
-- **`Swapper<T>`**: Not `Clone` (enforced via `Arc` single ownership)
+- **`Swapper<T>`**: Not `Clone`
   - Guarantees single writer via type system
-  - Can be shared across threads if wrapped in `Arc` (but breaks single-writer guarantee)
+  - Can be wrapped in `Mutex<Swapper<T>>` for multiple writers (but introduces lock contention)
 
-- **`SwapReader<T>`**: Not `Clone` (Use `fork()` instead)
-  - Use `fork()` to create a new reader for another thread.
-  - Each reader independently sees the latest value.
-  - Internally manages `LocalEpoch` registration.
+- **`SwapReader<T>`**: `Send + Sync`, implements `Clone`
+  - Can be safely stored in structs
+  - Can be shared across threads via `&SwapReader<T>`
+  - Only exposes `handle()` method, ensuring each thread has its own `LocalEpoch`
+
+- **`ReaderHandle<T>`**: `Send` but not `Sync`
+  - Contains thread-local `LocalEpoch` for epoch protection
+  - Provides actual read methods
+  - Should not be shared across threads
 
 ### Memory Management
 

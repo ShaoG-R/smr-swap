@@ -15,9 +15,9 @@ fn bench_single_thread_read(c: &mut Criterion) {
     // SMR-Swap 单线程读取
     group.bench_function("smr_swap", |b| {
         let swap = SmrSwap::new(vec![1; 1000]);
-        let reader = swap.reader();
+        let handle = swap.reader().handle();
         b.iter(|| {
-            let guard = reader.load();
+            let guard = handle.load();
             black_box(&*guard);
         });
     });
@@ -83,7 +83,7 @@ fn bench_multi_thread_read(c: &mut Criterion) {
 
                     let mut readers = Vec::with_capacity(num_readers);
                     for _ in 0..num_readers {
-                        readers.push(reader.fork());
+                        readers.push(reader.handle());
                     }
 
                     let start = std::time::Instant::now();
@@ -149,7 +149,7 @@ fn bench_mixed_read_write(c: &mut Criterion) {
 
                     let mut readers = Vec::with_capacity(num_readers);
                     for _ in 0..num_readers {
-                        readers.push(reader.fork());
+                        readers.push(reader.handle());
                     }
 
                     let start = std::time::Instant::now();
@@ -235,7 +235,7 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
 
                     let mut readers = Vec::with_capacity(num_readers);
                     for _ in 0..num_readers {
-                        readers.push(reader.fork());
+                        readers.push(reader.handle());
                     }
 
                     let start = std::time::Instant::now();
@@ -355,7 +355,7 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let start = std::time::Instant::now();
             thread::scope(|s| {
-                let reader_for_thread = reader.fork();
+                let reader_for_thread = reader.handle();
                 s.spawn(move || {
                     // 读取者持有守卫
                     let _guard = reader_for_thread.load();
@@ -410,21 +410,21 @@ fn bench_batch_read(c: &mut Criterion) {
     // SMR-Swap: 批量读取（单个 pin 内多次读取）
     group.bench_function("smr_swap_batch", |b| {
         let swap = SmrSwap::new(vec![1; 1000]);
-        let reader = swap.reader();
+        let reader = swap.reader().clone();
 
         b.iter_custom(|iters| {
-            let mut readers = Vec::with_capacity(4);
+            let mut handles = Vec::with_capacity(4);
             for _ in 0..4 {
-                readers.push(reader.fork());
+                handles.push(reader.handle());
             }
 
             let start = std::time::Instant::now();
             thread::scope(|s| {
-                for reader in readers {
+                for handle in handles {
                     s.spawn(move || {
                         for _ in 0..iters {
                             // 批量读取：一个 pin 内多次读取
-                            let guard = reader.load();
+                            let guard = handle.load();
                             for _ in 0..10 {
                                 black_box(&*guard);
                             }
@@ -480,7 +480,7 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
         }
 
         b.iter_custom(|iters| {
-            let reader_for_thread = reader.fork();
+            let reader_for_thread = reader.handle();
 
             let start = std::time::Instant::now();
             thread::scope(|s| {

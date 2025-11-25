@@ -11,14 +11,16 @@
 //!
 //! let mut swap = SmrSwap::new(0);
 //!
-//! // Reader reads the value
-//! let reader = swap.reader().fork();
+//! // Get a shareable reader (Send + Sync)
+//! let reader = swap.reader().clone();
 //!
 //! // Writer updates the value
 //! swap.update(1);
 //!
 //! let handle = thread::spawn(move || {
-//!     let guard = reader.load();
+//!     // Create a thread-local handle to read
+//!     let local = reader.handle();
+//!     let guard = local.load();
 //!     assert_eq!(*guard, 1);
 //! });
 //!
@@ -41,12 +43,31 @@ pub struct Swapper<T> {
     gc: GcHandle,
 }
 
-/// Reader type, not cloneable (use fork() to create a new reader for another thread)
+/// Shareable reader (Send + Sync), can be stored in structs and shared across threads
 ///
-/// 读取者类型，不可Clone（使用 fork() 为另一个线程创建新的读取者）
+/// 可共享的读取者（Send + Sync），可以存储在结构体中并跨线程共享
+///
+/// This type is designed to be safely shared across threads and stored in structs.
+/// To perform actual read operations, call `handle()` to create a thread-local `ReaderHandle`.
+///
+/// 此类型设计为可以安全地跨线程共享并存储在结构体中。
+/// 要执行实际的读取操作，请调用 `handle()` 创建线程本地的 `ReaderHandle`。
 pub struct SwapReader<T> {
     current: Arc<EpochPtr<T>>,
     domain: EpochGcDomain,
+}
+
+/// Thread-local reader handle, not Sync (use SwapReader::handle() to create)
+///
+/// 线程本地的读取句柄，不是 Sync（使用 SwapReader::handle() 创建）
+///
+/// This type contains a thread-local `LocalEpoch` and cannot be shared across threads.
+/// Create one per thread using `SwapReader::handle()`.
+///
+/// 此类型包含线程本地的 `LocalEpoch`，不能跨线程共享。
+/// 使用 `SwapReader::handle()` 为每个线程创建一个。
+pub struct ReaderHandle<T> {
+    reader: SwapReader<T>,
     epoch: LocalEpoch,
 }
 
@@ -56,6 +77,7 @@ pub struct SwapReader<T> {
 pub struct SmrSwap<T> {
     swapper: Swapper<T>,
     reader: SwapReader<T>,
+    handle: ReaderHandle<T>,
 }
 
 /// RAII guard for reading values
@@ -96,12 +118,7 @@ pub fn new_smr_pair<T: 'static>(initial: T) -> (Swapper<T>, SwapReader<T>) {
         gc,
     };
 
-    let reader_epoch = domain.register_reader();
-    let reader = SwapReader {
-        current,
-        domain,
-        epoch: reader_epoch,
-    };
+    let reader = SwapReader { current, domain };
 
     (swapper, reader)
 }
@@ -113,7 +130,8 @@ impl<T: 'static> SmrSwap<T> {
     #[inline]
     pub fn new(initial: T) -> Self {
         let (swapper, reader) = new_smr_pair(initial);
-        Self { swapper, reader }
+        let handle = reader.handle();
+        Self { swapper, reader, handle }
     }
 
     /// Get a reference to the inner Swapper
@@ -124,20 +142,20 @@ impl<T: 'static> SmrSwap<T> {
         &mut self.swapper
     }
 
-    /// Get a reference to the inner SwapReader
+    /// Get a reference to the inner SwapReader (Send + Sync)
     ///
-    /// 获取内部 SwapReader 的引用
+    /// 获取内部 SwapReader 的引用（Send + Sync）
     #[inline]
     pub fn reader(&self) -> &SwapReader<T> {
         &self.reader
     }
 
-    /// Split into Swapper and SwapReader
+    /// Get a reference to the internal ReaderHandle for direct reading
     ///
-    /// 拆分为 Swapper 和 SwapReader
+    /// 获取内部 ReaderHandle 的引用，用于直接读取
     #[inline]
-    pub fn into_components(self) -> (Swapper<T>, SwapReader<T>) {
-        (self.swapper, self.reader)
+    pub fn handle(&self) -> &ReaderHandle<T> {
+        &self.handle
     }
 
     /// Perform a write operation to update the current version
@@ -153,7 +171,7 @@ impl<T: 'static> SmrSwap<T> {
     /// 使用 RAII 守卫读取当前版本（无锁）
     #[inline]
     pub fn load(&self) -> ReaderGuard<'_, T> {
-        self.reader.load()
+        self.handle.load()
     }
 
     /// Apply a closure function to the current value and return the result
@@ -170,11 +188,11 @@ impl<T: 'static> SmrSwap<T> {
     where
         F: FnOnce(&T) -> T,
     {
-        let guard = self.reader.epoch.pin();
-        let old_val = self.reader.current.load(&guard);
+        let guard = self.handle.epoch.pin();
+        let old_val = self.handle.reader.current.load(&guard);
         let new_value = f(old_val);
         self.swapper.update(new_value);
-        let ptr = self.reader.current.load(&guard) as *const T;
+        let ptr = self.handle.reader.current.load(&guard) as *const T;
         ReaderGuard { _guard: guard, ptr }
     }
 }
@@ -187,8 +205,8 @@ impl<T: 'static> SmrSwap<Arc<T>> {
     pub fn swap(&mut self, new_value: Arc<T>) -> Arc<T> {
         // Read the current value before swapping
         // 在交换前读取当前值
-        let guard = self.reader.epoch.pin();
-        let old_value = self.reader.current.load(&guard).clone();
+        let guard = self.handle.epoch.pin();
+        let old_value = self.handle.reader.current.load(&guard).clone();
         drop(guard);
 
         self.swapper.update(new_value);
@@ -204,8 +222,8 @@ impl<T: 'static> SmrSwap<Arc<T>> {
     where
         F: FnOnce(&Arc<T>) -> Arc<T>,
     {
-        let guard = self.reader.epoch.pin();
-        let current = self.reader.current.load(&guard);
+        let guard = self.handle.epoch.pin();
+        let current = self.handle.reader.current.load(&guard);
         let new_value = f(current);
         drop(guard);
         self.swapper.update(new_value.clone());
@@ -230,32 +248,50 @@ impl<T: 'static> Swapper<T> {
 }
 
 impl<T: 'static> SwapReader<T> {
-    /// Create a new reader for the current thread
+    /// Create a new thread-local reader handle
     ///
-    /// This replaces `Clone`. Since `LocalEpoch` is thread-local, we must register a new one
-    /// when creating a reader for a new thread.
+    /// This is the only way to create a `ReaderHandle` from a `SwapReader`.
+    /// Call this method when you need to perform read operations.
     ///
-    /// 为当前线程创建一个新的读取者
+    /// 创建一个新的线程本地读取句柄
     ///
-    /// 这替代了 `Clone`。由于 `LocalEpoch` 是线程本地的，我们在为新线程创建读取者时必须注册一个新的。
+    /// 这是从 `SwapReader` 创建 `ReaderHandle` 的唯一方法。
+    /// 当你需要执行读取操作时，请调用此方法。
     #[inline]
-    pub fn fork(&self) -> Self {
-        Self {
-            current: self.current.clone(),
-            domain: self.domain.clone(),
+    pub fn handle(&self) -> ReaderHandle<T> {
+        ReaderHandle {
+            reader: Self {
+                current: self.current.clone(),
+                domain: self.domain.clone(),
+            },
             epoch: self.domain.register_reader(),
         }
     }
+}
 
-    /// Read the current version (lock-free) with RAII guard
+impl<T> Clone for SwapReader<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            current: self.current.clone(),
+            domain: self.domain.clone(),
+        }
+    }
+}
+
+impl<T: 'static> ReaderHandle<T> {
+    /// Get a reference to the inner `SwapReader` (Send + Sync)
     ///
-    /// Returns a `ReaderGuard` that holds the pin and the reference.
-    /// The pin is automatically released when the guard is dropped.
+    /// Use this to get a shareable reference that can be stored in structs.
     ///
-    /// 使用 RAII 守卫读取当前版本（无锁）
+    /// 获取内部 `SwapReader` 的引用（Send + Sync）
     ///
-    /// 返回一个持有 pin 和引用的 `ReaderGuard`。
-    /// 当守卫被 drop 时，pin 会自动释放。
+    /// 使用此方法获取可存储在结构体中的可共享引用。
+    #[inline]
+    pub fn reader(&self) -> &SwapReader<T> {
+        &self.reader
+    }
+
     /// Read the current version (lock-free) with RAII guard
     ///
     /// Returns a `ReaderGuard` that holds the pin and the reference.
@@ -268,7 +304,7 @@ impl<T: 'static> SwapReader<T> {
     #[inline]
     pub fn load(&self) -> ReaderGuard<'_, T> {
         let _guard = self.epoch.pin();
-        let ptr = self.current.load(&_guard) as *const T;
+        let ptr = self.reader.current.load(&_guard) as *const T;
         ReaderGuard { _guard, ptr }
     }
 
@@ -286,7 +322,7 @@ impl<T: 'static> SwapReader<T> {
         F: FnOnce(&T) -> U,
     {
         let guard = self.epoch.pin();
-        f(self.current.load(&guard))
+        f(self.reader.current.load(&guard))
     }
 
     /// Apply a closure function to the current value, returning Some if the closure returns true, otherwise None
@@ -301,7 +337,7 @@ impl<T: 'static> SwapReader<T> {
 
         // Use a block to limit the scope of the borrow
         let ptr = {
-            let val = self.current.load(&_guard);
+            let val = self.reader.current.load(&_guard);
             if !f(val) {
                 return None;
             }
@@ -309,6 +345,22 @@ impl<T: 'static> SwapReader<T> {
         };
 
         Some(ReaderGuard { _guard, ptr })
+    }
+}
+
+/// Clone implementation for ReaderHandle
+///
+/// Each cloned handle creates a new `LocalEpoch` registration via `handle()`.
+/// This ensures each handle has its own independent epoch for safe concurrent access.
+///
+/// ReaderHandle 的 Clone 实现
+///
+/// 每个克隆的句柄通过 `handle()` 创建新的 `LocalEpoch` 注册。
+/// 这确保每个句柄拥有独立的 epoch，以实现安全的并发访问。
+impl<T: 'static> Clone for ReaderHandle<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        self.reader.handle()
     }
 }
 

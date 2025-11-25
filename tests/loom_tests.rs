@@ -14,7 +14,7 @@ use smr_swap::SmrSwap;
 fn loom_basic_update_read() {
     loom::model(|| {
         let mut swap = SmrSwap::new(0);
-        let reader = swap.reader().fork();
+        let reader = swap.reader().handle();
 
         let t = thread::spawn(move || {
             let guard = reader.load();
@@ -32,7 +32,7 @@ fn loom_basic_update_read() {
 fn loom_multiple_updates_reads() {
     loom::model(|| {
         let mut swap = SmrSwap::new(0);
-        let reader = swap.reader().fork();
+        let reader = swap.reader().handle();
 
         let t = thread::spawn(move || {
             for _ in 0..2 {
@@ -70,7 +70,7 @@ fn loom_swapper_read() {
 fn loom_map() {
     loom::model(|| {
         let mut swap = SmrSwap::new(5);
-        let reader = swap.reader().fork();
+        let reader = swap.reader().handle();
 
         let t = thread::spawn(move || {
             let res = reader.map(|v| v * 2);
@@ -87,7 +87,7 @@ fn loom_map() {
 fn loom_update_and_fetch() {
     loom::model(|| {
         let mut swap = SmrSwap::new(10);
-        let reader = swap.reader().fork();
+        let reader = swap.reader().handle();
 
         let t = thread::spawn(move || {
             let guard = reader.load();
@@ -106,7 +106,7 @@ fn loom_update_and_fetch() {
 fn loom_arc_swap() {
     loom::model(|| {
         let mut swap = SmrSwap::new(Arc::new(100));
-        let reader = swap.reader().fork();
+        let reader = swap.reader().handle();
 
         let t = thread::spawn(move || {
             let guard = reader.load();
@@ -125,7 +125,7 @@ fn loom_arc_swap() {
 fn loom_filter() {
     loom::model(|| {
         let mut swap = SmrSwap::new(10);
-        let reader = swap.reader().fork();
+        let reader = swap.reader().handle();
 
         let t = thread::spawn(move || {
             // Should find it if it's 10 or 20 (depending on timing)
@@ -152,7 +152,7 @@ fn loom_concurrent_readers() {
         let mut handles = vec![];
 
         for _ in 0..2 {
-            let reader = swap.reader().fork();
+            let reader = swap.reader().handle();
             handles.push(thread::spawn(move || {
                 let guard = reader.load();
                 assert!(*guard == 0 || *guard == 1);

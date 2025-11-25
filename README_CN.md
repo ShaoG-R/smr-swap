@@ -15,7 +15,7 @@
 - **单写多读模式**: 通过 `Swapper<T>` 和 `SwapReader<T>` 在类型系统层面强制执行
 - **内存安全**: 使用基于 Epoch 的回收机制（通过 `swmr-epoch`）防止 Use-After-Free
 - **零拷贝读取**: 读取者通过 RAII 守卫直接获得当前值的引用
-- **并发安全**: 在多线程中安全使用，支持 `Send + Sync` 约束
+- **线程安全**: `SwapReader<T>` 是 `Send + Sync`，可以安全地存储在结构体中并跨线程共享
 
 ## 快速开始
 
@@ -25,7 +25,7 @@
 
 ```toml
 [dependencies]
-smr-swap = "0.5"
+smr-swap = "0.6"
 ```
 
 ### 基本用法
@@ -35,67 +35,112 @@ use smr_swap::SmrSwap;
 use std::thread;
 
 fn main() {
-    // 创建一个新的 SMR 容器，初始值为 vec![1, 2, 3]
+    // 创建一个新的 SMR 容器
     let mut swap = SmrSwap::new(vec![1, 2, 3]);
 
-    // 为新线程创建一个读取者（必须使用 fork()）
-    let reader = swap.reader().fork();
+    // 获取可共享的 reader（Send + Sync）
+    let reader = swap.reader().clone();
 
     let handle = thread::spawn(move || {
-        // 读取值（无锁）
-        let guard = reader.load();
+        // 在新线程中创建本地句柄进行读取
+        let local = reader.handle();
+        let guard = local.load();
         println!("Reader sees: {:?}", *guard);
     });
 
     // 写入者更新值
     swap.update(vec![4, 5, 6]);
     
-    // 主线程也可以读取
+    // 主线程直接读取
     println!("Main thread sees: {:?}", *swap.load());
 
     handle.join().unwrap();
 }
 ```
 
-### 使用 Arc 进行共享所有权
+### 在结构体中存储 Reader
 
-SMR-Swap 可以与任何类型 `T` 一起使用，你也可以将值包装在 `Arc` 中以实现共享所有权：
+`SwapReader<T>` 是 `Send + Sync`，可以安全地存储在结构体中：
 
 ```rust
-use smr_swap::SmrSwap;
-use std::sync::Arc;
+use smr_swap::{SmrSwap, SwapReader};
+use std::thread;
+
+struct MyService {
+    reader: SwapReader<Config>,
+}
+
+impl MyService {
+    fn get_config(&self) -> String {
+        // 创建线程本地句柄进行读取
+        let handle = self.reader.handle();
+        handle.map(|config| config.name.clone())
+    }
+}
+
+struct Config {
+    name: String,
+}
 
 fn main() {
-    let mut swap = SmrSwap::new(Arc::new(vec![1, 2, 3]));
+    let (mut swapper, reader) = smr_swap::new_smr_pair(Config { name: "default".into() });
+    let service = MyService { reader };
     
-    // 更新为新的 Arc
-    swap.update(Arc::new(vec![4, 5, 6]));
-    
-    // 或者使用 swap() 取回旧值
-    let old = swap.swap(Arc::new(vec![7, 8, 9]));
-    println!("Old value: {:?}", old);
+    // service 可以安全地在线程间共享
+    thread::scope(|s| {
+        s.spawn(|| println!("{}", service.get_config()));
+        s.spawn(|| println!("{}", service.get_config()));
+    });
 }
 ```
 
 ### 分离写入者和读取者
 
-你可以将容器拆分为独立的组件：
-
 ```rust
-use smr_swap::SmrSwap;
+use std::thread;
 
 fn main() {
-    // 方式 1: 先创建 SmrSwap，然后拆分
-    let swap = SmrSwap::new(42);
-    let (mut swapper, reader) = swap.into_components();
-    
-    // 方式 2: 直接创建组件
+    // 直接创建 Swapper 和 SwapReader 对
     let (mut swapper, reader) = smr_swap::new_smr_pair(42);
     
-    // 将 `swapper` 传递给写入线程
-    // 将 `reader` 传递给读取线程（每个线程使用 reader.fork()）
+    // reader 是 Send + Sync，可以 clone 后传递给多个线程
+    let reader_clone = reader.clone();
+    
+    thread::spawn(move || {
+        let handle = reader_clone.handle();
+        println!("Value: {}", *handle.load());
+    });
+    
+    // 写入者更新值
+    swapper.update(100);
 }
 ```
+
+## 核心概念
+
+### 类型层次
+
+| 类型 | 线程安全性 | 角色 | 关键方法 |
+|------|----------|------|--------|
+| `SwapReader<T>` | `Send + Sync` | 可共享的读取者，可存储在结构体中 | `handle()` |
+| `ReaderHandle<T>` | 仅 `Send` | 线程本地句柄，用于实际读取 | `load()`, `map()`, `filter()` |
+
+```
+SwapReader  ──handle()──►  ReaderHandle  ──load()──►  ReaderGuard
+ (可共享)                   (线程本地)                (RAII 守卫)
+```
+
+### 为什么这样设计？
+
+1. **`SwapReader<T>`** 是 `Send + Sync`
+   - 可以安全地存储在结构体中
+   - 可以通过 `&SwapReader` 跨线程共享
+   - 只暴露 `handle()` 方法，不能直接读取
+
+2. **`ReaderHandle<T>`** 是 `Send` 但不是 `Sync`
+   - 包含线程本地的 `LocalEpoch`
+   - 提供实际的读取方法：`load()`、`map()`、`filter()`
+   - 每个线程需要自己的 `ReaderHandle`
 
 ## API 概览
 
@@ -103,20 +148,27 @@ fn main() {
 - `new_smr_pair<T>(initial: T) -> (Swapper<T>, SwapReader<T>)`: 直接创建一对 Swapper 和 SwapReader。
 
 ### `SmrSwap<T>`
-主入口点。持有写入者和读取者。
+主入口点。持有写入者、读取者和内部句柄。
 - `new(initial: T)`: 创建新容器。
 - `update(new_value: T)`: 更新值。
-- `load()`: 读取当前值。
-- `reader()`: 获取读取者引用。
+- `load()`: 读取当前值（使用内部句柄）。
+- `reader()`: 获取 `&SwapReader`（Send + Sync）。
+- `handle()`: 获取 `&ReaderHandle`（用于直接读取）。
 - `swapper()`: 获取写入者引用。
-- `into_components()`: 拆分为 `Swapper` 和 `SwapReader`。
 
-### `SwapReader<T>`
-读取者组件。
-- `fork()`: 为另一个线程创建新的读取者。**重要**: `SwapReader` 不实现 `Clone`，以强制使用 `fork` 进行显式的线程本地 Epoch 注册。
-- `load()`: 返回指向当前值的 `ReaderGuard`。
-- `map(|v| ...)`: 对值应用函数并返回结果。
-- `filter(|v| ...)`: 条件性返回守卫。
+### `SwapReader<T>` (Send + Sync)
+可共享的读取者，可存储在结构体中。
+- `handle() -> ReaderHandle<T>`: 创建线程本地的读取句柄。
+- `clone()`: 克隆 reader（实现 `Clone`）。
+
+### `ReaderHandle<T>` (!Sync)
+线程本地的读取句柄。
+- `load() -> ReaderGuard<T>`: 返回指向当前值的守卫。
+- `map<F, U>(f: F) -> U`: 对值应用函数并返回结果。
+- `filter<F>(f: F) -> Option<ReaderGuard<T>>`: 条件性返回守卫。
+- `handle() -> ReaderHandle<T>`: 创建新的句柄。
+- `reader() -> &SwapReader<T>`: 获取内部的 `SwapReader` 引用。
+- `clone()`: 克隆 handle（实现 `Clone`）。
 
 ### `Swapper<T>`
 写入者组件。
@@ -223,14 +275,19 @@ arc-swap:  908.69 ns ██████████████████
 
 ### 类型系统保证
 
-- **`Swapper<T>`**: 不可 `Clone`（通过 `Arc` 单一所有权强制）
+- **`Swapper<T>`**: 不可 `Clone`
   - 通过类型系统保证单个写入者
-  - 可以包装在 `Arc` 中在线程间共享（但会破坏单写保证）
+  - 可以包装在 `Mutex<Swapper<T>>` 中支持多写入者（但这会引入锁竞争）
 
-- **`SwapReader<T>`**: 不可 `Clone`（使用 `fork()` 替代）
-  - 使用 `fork()` 为另一个线程创建新的读取者。
-  - 每个读取者独立看到最新值。
-  - 内部管理 `LocalEpoch` 注册。
+- **`SwapReader<T>`**: `Send + Sync`，可 `Clone`
+  - 可以安全地存储在结构体中
+  - 可以跨线程共享引用 `&SwapReader<T>`
+  - 只暴露 `handle()` 方法，确保每个线程有自己的 `LocalEpoch`
+
+- **`ReaderHandle<T>`**: `Send` 但不是 `Sync`
+  - 包含线程本地的 `LocalEpoch`，用于 Epoch 保护
+  - 提供实际的读取方法
+  - 不应在线程间共享
 
 ### 内存管理
 

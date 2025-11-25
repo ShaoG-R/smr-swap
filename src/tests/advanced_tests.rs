@@ -10,7 +10,7 @@ use crate::SmrSwap;
 #[test]
 fn test_reader_map_int() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let result = reader.map(|x| x * 2);
     assert_eq!(result, 20);
@@ -25,7 +25,7 @@ fn test_reader_map_int() {
 #[test]
 fn test_reader_map_string() {
     let mut swap = SmrSwap::new(String::from("hello"));
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let result = reader.map(|s| s.len());
     assert_eq!(result, 5);
@@ -40,7 +40,7 @@ fn test_reader_map_string() {
 #[test]
 fn test_reader_map_vector() {
     let mut swap = SmrSwap::new(vec![1, 2, 3]);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let result = reader.map(|v| v.len());
     assert_eq!(result, 3);
@@ -55,7 +55,7 @@ fn test_reader_map_vector() {
 #[test]
 fn test_reader_filter() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = reader.filter(|x| *x > 5);
     assert!(val.is_some());
@@ -71,7 +71,7 @@ fn test_reader_filter() {
 #[test]
 fn test_reader_filter_string() {
     let mut swap = SmrSwap::new(String::from("hello"));
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = reader.filter(|s| s.len() > 3);
     assert!(val.is_some());
@@ -87,7 +87,7 @@ fn test_reader_filter_string() {
 #[test]
 fn test_reader_filter_vector() {
     let mut swap = SmrSwap::new(vec![1, 2, 3, 4, 5]);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = reader.filter(|v| v.len() > 3);
     assert!(val.is_some());
@@ -103,7 +103,7 @@ fn test_reader_filter_vector() {
 #[test]
 fn test_writer_update_and_fetch() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     {
         let val1 = swap.update_and_fetch(|x| x * 2);
@@ -121,7 +121,7 @@ fn test_writer_update_and_fetch() {
 #[test]
 fn test_writer_update_and_fetch_string() {
     let mut swap = SmrSwap::new(String::from("hello"));
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     {
         let val1 = swap.update_and_fetch(|s| s.to_uppercase());
@@ -139,7 +139,7 @@ fn test_writer_update_and_fetch_string() {
 #[test]
 fn test_writer_update_and_fetch_vector() {
     let mut swap = SmrSwap::new(vec![1, 2, 3]);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = swap.update_and_fetch(|v| {
         let mut new_v = v.clone();
@@ -155,7 +155,7 @@ fn test_writer_update_and_fetch_vector() {
 #[test]
 fn test_writer_read() {
     let mut swap = SmrSwap::new(42);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = swap.load();
     assert_eq!(*val, 42);
@@ -171,7 +171,7 @@ fn test_writer_read() {
 #[test]
 fn test_writer_read_string() {
     let mut swap = SmrSwap::new(String::from("test"));
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = swap.load();
     assert_eq!(*val, "test");
@@ -187,7 +187,7 @@ fn test_writer_read_string() {
 #[test]
 fn test_chained_operations() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     // Chain: read -> filter -> map
     // 链式：read -> filter -> map
@@ -207,7 +207,7 @@ fn test_chained_operations() {
 #[test]
 fn test_multiple_operations_same_guard() {
     let swap = SmrSwap::new(vec![1, 2, 3, 4, 5]);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
     let guard = reader.load();
 
     // Multiple operations on the same guard
@@ -223,7 +223,7 @@ fn test_multiple_operations_same_guard() {
 #[test]
 fn test_map_complex_transformation() {
     let mut swap = SmrSwap::new(vec![1, 2, 3, 4, 5]);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let result = reader.map(|v| v.iter().filter(|x| *x % 2 == 0).map(|x| x * 2).sum::<i32>());
     assert_eq!(result, 12); // (2*2 + 4*2) = 12
@@ -238,7 +238,7 @@ fn test_map_complex_transformation() {
 #[test]
 fn test_filter_complex_condition() {
     let mut swap = SmrSwap::new(String::from("hello"));
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = reader.filter(|s| s.len() > 3 && s.contains('l'));
     assert!(val.is_some());
@@ -253,7 +253,7 @@ fn test_filter_complex_condition() {
 #[test]
 fn test_update_and_fetch_side_effects() {
     let mut swap = SmrSwap::new(vec![1, 2, 3]);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let mut call_count = 0;
     let val = swap.update_and_fetch(|v| {
@@ -273,7 +273,7 @@ fn test_update_and_fetch_side_effects() {
 #[test]
 fn test_map_with_none_value() {
     let mut swap = SmrSwap::new(Some(42));
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     // Map on Some value
     let result = reader.map(|opt| opt.unwrap_or(0));
@@ -290,7 +290,7 @@ fn test_map_with_none_value() {
 #[test]
 fn test_filter_always_true() {
     let swap = SmrSwap::new(42);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = reader.filter(|_| true);
     assert!(val.is_some());
@@ -302,7 +302,7 @@ fn test_filter_always_true() {
 #[test]
 fn test_filter_always_false() {
     let swap = SmrSwap::new(42);
-    let reader = swap.reader().fork();
+    let reader = swap.reader().handle();
 
     let val = reader.filter(|_| false);
     assert!(val.is_none());
