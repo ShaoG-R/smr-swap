@@ -15,9 +15,9 @@ fn bench_single_thread_read(c: &mut Criterion) {
     // SMR-Swap 单线程读取
     group.bench_function("smr_swap", |b| {
         let swap = SmrSwap::new(vec![1; 1000]);
-        let handle = swap.handle().clone();
+        let local = swap.local();
         b.iter(|| {
-            let guard = handle.load();
+            let guard = local.load();
             black_box(&*guard);
         });
     });
@@ -82,7 +82,7 @@ fn bench_multi_thread_read(c: &mut Criterion) {
 
                     let mut readers = Vec::with_capacity(num_readers);
                     for _ in 0..num_readers {
-                        readers.push(swap.handle().clone());
+                        readers.push(swap.local());
                     }
 
                     let start = std::time::Instant::now();
@@ -144,19 +144,19 @@ fn bench_mixed_read_write(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (mut swapper, reader) = smr_swap::new_smr_pair(vec![1; 1000]);
+                    let mut swap = SmrSwap::new(vec![1; 1000]);
 
                     let mut readers = Vec::with_capacity(num_readers);
                     for _ in 0..num_readers {
-                        readers.push(reader.handle());
+                        readers.push(swap.local());
                     }
 
                     let start = std::time::Instant::now();
                     thread::scope(|s| {
                         // 写入者线程
-                        s.spawn(move || {
+                        s.spawn(|| {
                             for i in 0..iters {
-                                swapper.update(vec![i as u32; 1000]);
+                                swap.update(vec![i as u32; 1000]);
                             }
                         });
 
@@ -229,22 +229,22 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
             num_readers,
             |b, &num_readers| {
                 b.iter_custom(|iters| {
-                    let (swapper, reader) = smr_swap::new_smr_pair(vec![1; 1000]);
-                    let swapper = Arc::new(Mutex::new(swapper));
+                    let swap = SmrSwap::new(vec![1; 1000]);
+                    let swap = Arc::new(Mutex::new(swap));
 
                     let mut readers = Vec::with_capacity(num_readers);
                     for _ in 0..num_readers {
-                        readers.push(reader.handle());
+                        readers.push(swap.lock().unwrap().local());
                     }
 
                     let start = std::time::Instant::now();
                     thread::scope(|s| {
                         // 写入者线程
                         for _ in 0..num_writers {
-                            let swapper_clone = swapper.clone();
+                            let swap_clone = swap.clone();
                             s.spawn(move || {
                                 for i in 0..iters {
-                                    swapper_clone.lock().unwrap().update(vec![i as u32; 1000]);
+                                    swap_clone.lock().unwrap().update(vec![i as u32; 1000]);
                                 }
                             });
                         }
@@ -349,15 +349,15 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
 
     // SMR-Swap: 读取者持有守卫，写入者写入
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, reader) = smr_swap::new_smr_pair(vec![1; 1000]);
+        let mut swap = SmrSwap::new(vec![1; 1000]);
 
         b.iter_custom(|iters| {
+            let reader = swap.local();
             let start = std::time::Instant::now();
             thread::scope(|s| {
-                let reader_for_thread = reader.handle();
                 s.spawn(move || {
                     // 读取者持有守卫
-                    let _guard = reader_for_thread.load();
+                    let _guard = reader.load();
                     // 模拟长时间持有
                     std::thread::sleep(std::time::Duration::from_micros(10));
                     drop(_guard);
@@ -365,7 +365,7 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
 
                 // 写入者尝试写入
                 for i in 0..iters {
-                    swapper.update(vec![i as u32; 1000]);
+                    swap.update(vec![i as u32; 1000]);
                 }
             });
             start.elapsed()
@@ -411,18 +411,18 @@ fn bench_batch_read(c: &mut Criterion) {
         let swap = SmrSwap::new(vec![1; 1000]);
 
         b.iter_custom(|iters| {
-            let mut handles = Vec::with_capacity(4);
+            let mut locals = Vec::with_capacity(4);
             for _ in 0..4 {
-                handles.push(swap.handle().clone());
+                locals.push(swap.local());
             }
 
             let start = std::time::Instant::now();
             thread::scope(|s| {
-                for handle in handles {
+                for local in locals {
                     s.spawn(move || {
                         for _ in 0..iters {
                             // 批量读取：一个 pin 内多次读取
-                            let guard = handle.load();
+                            let guard = local.load();
                             for _ in 0..10 {
                                 black_box(&*guard);
                             }
@@ -470,28 +470,28 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
 
     // SMR-Swap: 频繁写入导致内存压力
     group.bench_function("smr_swap", |b| {
-        let (mut swapper, reader) = smr_swap::new_smr_pair(vec![0; 10000]);
+        let mut swap = SmrSwap::new(vec![0u32; 10000]);
 
         // 预先进行大量写入以积累垃圾
         for i in 0..1000 {
-            swapper.update(vec![i; 10000]);
+            swap.update(vec![i; 10000]);
         }
 
         b.iter_custom(|iters| {
-            let reader_for_thread = reader.handle();
+            let reader = swap.local();
 
             let start = std::time::Instant::now();
             thread::scope(|s| {
                 s.spawn(move || {
                     for _ in 0..iters {
-                        let guard = reader_for_thread.load();
+                        let guard = reader.load();
                         black_box(&*guard);
                     }
                 });
 
                 // 同时进行写入
                 for i in 0..iters {
-                    swapper.update(vec![i as u32; 10000]);
+                    swap.update(vec![i as u32; 10000]);
                 }
             });
             start.elapsed()

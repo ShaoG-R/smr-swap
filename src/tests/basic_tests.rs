@@ -2,11 +2,7 @@
 //!
 //! Tests core operations: creation, reading, updating, and basic reader operations
 
-//! Basic functionality tests for SMR-Swap
-//!
-//! Tests core operations: creation, reading, updating, and basic reader operations
-
-use crate::{ReaderHandle, SmrSwap, SwapReader, Swapper};
+use crate::{LocalReader, SmrSwap};
 
 /// Test basic creation and reading with integers
 /// 测试基本的创建和读取（整数）
@@ -40,7 +36,7 @@ fn test_basic_new_and_read_vector() {
 #[test]
 fn test_basic_update_int() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     assert_eq!(*reader.load(), 10);
 
@@ -53,7 +49,7 @@ fn test_basic_update_int() {
 #[test]
 fn test_basic_update_string() {
     let mut swap = SmrSwap::new(String::from("hello"));
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     assert_eq!(*reader.load(), "hello");
 
@@ -66,7 +62,7 @@ fn test_basic_update_string() {
 #[test]
 fn test_multiple_updates() {
     let mut swap = SmrSwap::new(0);
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     for i in 1..=10 {
         swap.update(i);
@@ -74,12 +70,12 @@ fn test_multiple_updates() {
     }
 }
 
-/// Test reader forking with integers
-/// 测试读取者分叉（整数）
+/// Test reader cloning with integers
+/// 测试读取者克隆（整数）
 #[test]
-fn test_reader_fork_int() {
+fn test_reader_clone_int() {
     let mut swap = SmrSwap::new(10);
-    let reader1 = swap.handle().clone();
+    let reader1 = swap.local();
     let reader2 = reader1.clone();
 
     assert_eq!(*reader1.load(), 10);
@@ -91,12 +87,12 @@ fn test_reader_fork_int() {
     assert_eq!(*reader2.load(), 20);
 }
 
-/// Test reader forking with strings
-/// 测试读取者分叉（字符串）
+/// Test reader cloning with strings
+/// 测试读取者克隆（字符串）
 #[test]
-fn test_reader_fork_string() {
+fn test_reader_clone_string() {
     let mut swap = SmrSwap::new(String::from("initial"));
-    let reader1 = swap.handle().clone();
+    let reader1 = swap.local();
     let reader2 = reader1.clone();
     let reader3 = reader2.clone();
 
@@ -116,7 +112,7 @@ fn test_reader_fork_string() {
 #[test]
 fn test_multiple_readers_consistency() {
     let mut swap = SmrSwap::new(0);
-    let reader1 = swap.handle().clone();
+    let reader1 = swap.local();
     let reader2 = reader1.clone();
     let reader3 = reader2.clone();
 
@@ -152,7 +148,7 @@ fn test_multiple_readers_consistency() {
 #[test]
 fn test_read_guard_holds_value() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     let guard1 = reader.load();
     assert_eq!(*guard1, 10);
@@ -178,7 +174,7 @@ fn test_read_guard_holds_value() {
 #[test]
 fn test_multiple_held_guards() {
     let mut swap = SmrSwap::new(0);
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     // Get multiple guards
     // 获取多个守卫
@@ -211,21 +207,13 @@ fn test_multiple_held_guards() {
 /// Test Send trait bounds compilation
 /// 测试 Send 特性约束编译
 #[test]
-fn test_send_sync_compilation<'a>() {
+fn test_send_compilation() {
     fn assert_send<T: Send>() {}
-    fn assert_sync<T: Sync>() {}
 
-    assert_send::<Swapper<i32>>();
-    assert_send::<Swapper<*mut i32>>();
-    assert_send::<SwapReader<i32>>();
-    assert_send::<SwapReader<*mut i32>>();
-    assert_sync::<SwapReader<i32>>();
-    assert_sync::<SwapReader<*mut i32>>();
-    assert_send::<ReaderHandle<i32>>();
-    assert_send::<ReaderHandle<*mut i32>>();
-
-    assert_send::<SwapReader<&'a i32>>();
-    assert_sync::<SwapReader<&'a i32>>();
+    // SmrSwap is Send
+    assert_send::<SmrSwap<i32>>();
+    // LocalReader is Send but not Sync
+    assert_send::<LocalReader<i32>>();
 }
 
 /// Test with Box-wrapped values
@@ -233,7 +221,7 @@ fn test_send_sync_compilation<'a>() {
 #[test]
 fn test_with_boxed_values() {
     let mut swap = SmrSwap::new(Box::new(42));
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     let guard = reader.load();
     assert_eq!(**guard, 42);
@@ -250,7 +238,7 @@ fn test_with_arc_values() {
     use std::sync::Arc;
 
     let mut swap = SmrSwap::new(Arc::new(42));
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     let guard1 = reader.load();
     assert_eq!(**guard1, 42);
@@ -265,7 +253,7 @@ fn test_with_arc_values() {
 #[test]
 fn test_map() {
     let mut swap = SmrSwap::new(10);
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     // Map the value to a new type
     let doubled = reader.map(|val| *val * 2);
@@ -279,10 +267,12 @@ fn test_map() {
     assert_eq!(tripled, 60);
 }
 
+/// Test filter functionality
+/// 测试 filter 功能
 #[test]
 fn test_filter() {
     let mut swap = SmrSwap::new(Some(42));
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     // Filter with Some
     let val = reader.filter(|val| val.is_some()).unwrap();
@@ -301,17 +291,29 @@ fn test_filter() {
 #[test]
 fn test_update_and_fetch() {
     let mut swap = SmrSwap::new(10);
-
-    let reader = swap.handle().clone();
+    let reader = swap.local();
 
     let guard = swap.update_and_fetch(|val| val + 5);
     assert_eq!(*guard, 15);
 
-    // Verify with a new reader
+    // Verify with a reader
     assert_eq!(*reader.load(), 15);
 }
 
-/// Test swap with Arc functionality
+/// Test swap functionality
+/// 测试 swap 功能
+#[test]
+fn test_swap() {
+    let mut swap = SmrSwap::new(10);
+
+    let old = swap.swap(20);
+    assert_eq!(old, 10);
+
+    let reader = swap.local();
+    assert_eq!(*reader.load(), 20);
+}
+
+/// Test swap with Arc
 /// 测试 Arc 的 swap 功能
 #[test]
 fn test_swap_arc() {
@@ -321,21 +323,34 @@ fn test_swap_arc() {
     let old = swap.swap(Arc::new(20));
     assert_eq!(*old, 10);
 
-    let reader = swap.handle().clone();
+    let reader = swap.local();
     assert_eq!(**reader.load(), 20);
 }
 
-/// Test update_and_fetch_arc functionality
-/// 测试 update_and_fetch_arc 功能
+/// Test manual garbage collection
+/// 测试手动垃圾回收
 #[test]
-fn test_update_and_fetch_arc() {
-    use std::sync::Arc;
-    let mut swap = SmrSwap::new(Arc::new(10));
+fn test_manual_collect() {
+    let mut swap = SmrSwap::new(0);
 
-    let new_val = swap.update_and_fetch_arc(|val| Arc::new(**val + 5));
+    for i in 1..=100 {
+        swap.update(i);
+    }
 
-    assert_eq!(*new_val, 15);
+    // Manual collect should not panic
+    swap.collect();
 
-    let reader = swap.handle().clone();
-    assert_eq!(**reader.load(), 15);
+    assert_eq!(*swap.load(), 100);
+}
+
+/// Test load from SmrSwap directly
+/// 测试从 SmrSwap 直接读取
+#[test]
+fn test_smrswap_load() {
+    let mut swap = SmrSwap::new(42);
+
+    assert_eq!(*swap.load(), 42);
+
+    swap.update(100);
+    assert_eq!(*swap.load(), 100);
 }

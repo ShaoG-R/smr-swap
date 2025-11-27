@@ -1,21 +1,20 @@
-# SMR-Swap: Minimal-Locking Single-Writer Multiple-Reader Swap Container
+# SMR-Swap: Version-Based Single-Writer Multiple-Reader Swap Container
 
 [![Crates.io](https://img.shields.io/crates/v/smr-swap)](https://crates.io/crates/smr-swap)
 [![Documentation](https://docs.rs/smr-swap/badge.svg)](https://docs.rs/smr-swap)
 [![License](https://img.shields.io/crates/l/smr-swap)](LICENSE-MIT)
 
-A high-performance, minimal-locking Rust library for safely sharing mutable data between a single writer and multiple readers using epoch-based memory reclamation.
+A high-performance Rust library for safely sharing mutable data between a single writer and multiple readers using version-based memory reclamation.
 
 [中文文档](README_CN.md) | [English](README.md)
 
 ## Features
 
-- **Minimal-Locking**: Read operations are wait-free; write operations only require locks during garbage collection
+- **Minimal-Locking**: Read operations are wait-free; write operations only require synchronization during garbage collection
 - **High Performance**: Optimized for both read and write operations
-- **Single-Writer Multiple-Reader Pattern**: Type-safe enforcement via `Swapper<T>` and `SwapReader<T>`
-- **Memory Safe**: Uses epoch-based reclamation (via `swmr-epoch`) to prevent use-after-free
+- **Simple API**: Only three core types: `SmrSwap`, `LocalReader`, `ReadGuard`
+- **Memory Safe**: Uses version-based reclamation (via `swmr-cell`) to prevent use-after-free
 - **Zero-Copy Reads**: Readers get direct references to the current value via RAII guards
-- **Thread Safe**: `SwapReader<T>` is `Send + Sync`, can be safely stored in structs and shared across threads
 
 ## Quick Start
 
@@ -25,7 +24,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-smr-swap = "0.6"
+smr-swap = "0.7"
 ```
 
 ### Basic Usage
@@ -36,83 +35,82 @@ use std::thread;
 
 fn main() {
     // Create a new SMR container
-    let mut swap = SmrSwap::new(vec![1, 2, 3]);
+    let mut swap = SmrSwap::new(0);
 
-    // Get a shareable reader (Send + Sync)
-    let reader = swap.reader().clone();
-
-    let handle = thread::spawn(move || {
-        // Create a thread-local handle to read
-        let local = reader.handle();
-        let guard = local.load();
-        println!("Reader sees: {:?}", *guard);
-    });
+    // Get a thread-local reader
+    let local = swap.local();
 
     // Writer updates the value
-    swap.update(vec![4, 5, 6]);
-    
-    // Main thread reads directly
-    println!("Main thread sees: {:?}", *swap.load());
+    swap.update(1);
+
+    // Read in another thread
+    let local2 = swap.local();
+    let handle = thread::spawn(move || {
+        let guard = local2.load();
+        assert_eq!(*guard, 1);
+    });
 
     handle.join().unwrap();
 }
 ```
 
-### Storing Reader in Structs
-
-`SwapReader<T>` is `Send + Sync`, so it can be safely stored in structs:
+### Multi-Thread Reading
 
 ```rust
-use smr_swap::{SmrSwap, SwapReader};
+use smr_swap::SmrSwap;
 use std::thread;
 
-struct MyService {
-    reader: SwapReader<Config>,
-}
-
-impl MyService {
-    fn get_config(&self) -> String {
-        // Create a thread-local handle to read
-        let handle = self.reader.handle();
-        handle.map(|config| config.name.clone())
-    }
-}
-
-struct Config {
-    name: String,
-}
-
 fn main() {
-    let (mut swapper, reader) = smr_swap::new_smr_pair(Config { name: "default".into() });
-    let service = MyService { reader };
+    let mut swap = SmrSwap::new(vec![1, 2, 3]);
     
-    // service can be safely shared across threads
-    thread::scope(|s| {
-        s.spawn(|| println!("{}", service.get_config()));
-        s.spawn(|| println!("{}", service.get_config()));
-    });
+    // Create independent LocalReader for each thread
+    let readers: Vec<_> = (0..4).map(|_| swap.local()).collect();
+    
+    let handles: Vec<_> = readers
+        .into_iter()
+        .enumerate()
+        .map(|(i, local)| {
+            thread::spawn(move || {
+                let guard = local.load();
+                println!("Thread {} sees: {:?}", i, *guard);
+            })
+        })
+        .collect();
+
+    // Writer updates the value
+    swap.update(vec![4, 5, 6]);
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
 }
 ```
 
-### Separating Writer and Reader
+### Using Closures
 
 ```rust
-use std::thread;
+use smr_swap::SmrSwap;
 
 fn main() {
-    // Create Swapper and SwapReader pair directly
-    let (mut swapper, reader) = smr_swap::new_smr_pair(42);
-    
-    // reader is Send + Sync, can be cloned and passed to multiple threads
-    let reader_clone = reader.clone();
-    
-    thread::spawn(move || {
-        let handle = reader_clone.handle();
-        println!("Value: {}", *handle.load());
+    let mut swap = SmrSwap::new(vec![1, 2, 3]);
+    let local = swap.local();
+
+    // Use map to transform value
+    let sum: i32 = local.map(|v| v.iter().sum());
+    println!("Sum: {}", sum);
+
+    // Use filter to conditionally get guard
+    if let Some(guard) = local.filter(|v| v.len() > 2) {
+        println!("Vector has more than 2 elements: {:?}", *guard);
+    }
+
+    // Use update_and_fetch to update and get new value
+    let new_guard = swap.update_and_fetch(|v| {
+        let mut new_vec = v.clone();
+        new_vec.push(4);
+        new_vec
     });
-    
-    // Writer updates the value
-    swapper.update(100);
+    println!("New value: {:?}", *new_guard);
 }
 ```
 
@@ -120,181 +118,115 @@ fn main() {
 
 ### Type Hierarchy
 
-| Type | Thread Safety | Role | Key Method |
-|------|---------------|------|------------|
-| `SwapReader<T>` | `Send + Sync` | Shareable reader, can be stored in structs | `handle()` |
-| `ReaderHandle<T>` | `Send` only | Thread-local handle for actual reads | `load()`, `map()`, `filter()` |
+| Type | Role | Key Methods |
+|------|------|-------------|
+| `SmrSwap<T>` | Main container, holds data and write capability | `new()`, `update()`, `load()`, `local()`, `swap()` |
+| `LocalReader<T>` | Thread-local read handle | `load()`, `map()`, `filter()` |
+| `ReadGuard<'a, T>` | RAII guard, protects data during read | `Deref` |
 
 ```
-SwapReader  ──handle()──►  ReaderHandle  ──load()──►  ReaderGuard
- (shared)                   (per-thread)              (RAII guard)
+SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
+ (main)                (per-thread)              (RAII guard)
 ```
 
-### Why This Design?
+### Why LocalReader?
 
-1. **`SwapReader<T>`** is `Send + Sync`
-   - Can be safely stored in structs
-   - Can be shared across threads via `&SwapReader`
-   - Only exposes `handle()` method, cannot read directly
-
-2. **`ReaderHandle<T>`** is `Send` but not `Sync`
-   - Contains thread-local `LocalEpoch`
-   - Provides actual read methods: `load()`, `map()`, `filter()`
-   - Each thread needs its own `ReaderHandle`
+`LocalReader` is a thread-local read handle:
+- Each thread should create its own `LocalReader` and reuse it
+- `LocalReader` is `Send` but not `Sync`, should not be shared across threads
+- Contains thread-local version tracking for safe memory reclamation
 
 ## API Overview
 
-### Global Functions
-- `new_smr_pair<T>(initial: T) -> (Swapper<T>, SwapReader<T>)`: Create a new pair of Swapper and SwapReader directly.
-
 ### `SmrSwap<T>`
-The main entry point. Holds writer, reader, and internal handle.
-- `new(initial: T)`: Create a new container.
-- `update(new_value: T)`: Update the value.
-- `load()`: Read the current value (uses internal handle).
-- `reader()`: Get `&SwapReader` (Send + Sync).
-- `handle()`: Get `&ReaderHandle` (for direct reading).
-- `swapper()`: Get a reference to the writer.
 
-### `SwapReader<T>` (Send + Sync)
-Shareable reader that can be stored in structs.
-- `handle() -> ReaderHandle<T>`: Create a thread-local read handle.
-- `clone()`: Clone the reader (implements `Clone`).
+Main entry point, holds data and write capability.
 
-### `ReaderHandle<T>` (!Sync)
+| Method | Description |
+|--------|-------------|
+| `new(initial: T)` | Create a new container |
+| `local() -> LocalReader<T>` | Create a thread-local read handle |
+| `update(new_value: T)` | Update the value, old value will be safely reclaimed |
+| `load() -> ReadGuard<T>` | Read current value using internal handle |
+| `swap(new_value: T) -> T` | Swap value and return old value (requires `T: Clone`) |
+| `update_and_fetch(f) -> ReadGuard<T>` | Apply closure to update and return guard to new value |
+| `collect()` | Manually trigger garbage collection |
+
+### `LocalReader<T>`
+
 Thread-local read handle.
-- `load() -> ReaderGuard<T>`: Returns a guard pointing to the current value.
-- `map<F, U>(f: F) -> U`: Apply a function to the value and return the result.
-- `filter<F>(f: F) -> Option<ReaderGuard<T>>`: Conditionally return a guard.
-- `handle() -> ReaderHandle<T>`: Create a new handle.
-- `reader() -> &SwapReader<T>`: Get a reference to the inner `SwapReader`.
-- `clone()`: Clone the handle (implements `Clone`).
 
-### `Swapper<T>`
-The writer component.
-- `update(new_value: T)`: Update the value.
+| Method | Description |
+|--------|-------------|
+| `load() -> ReadGuard<T>` | Read current value, returns RAII guard |
+| `map<F, U>(f: F) -> U` | Apply function to value and return result |
+| `filter<F>(f: F) -> Option<ReadGuard<T>>` | Conditionally return a guard |
+| `clone()` | Create a new `LocalReader` |
 
-## Performance Characteristics
+### `ReadGuard<'a, T>`
 
-Comprehensive benchmark results comparing SMR-Swap against `arc-swap` on modern hardware.
+RAII guard, implements `Deref<Target = T>`, protects data from reclamation while guard is alive.
 
-### Benchmark Summary Table
+## Performance
 
-| Scenario | SMR-Swap | ArcSwap | Improvement | Notes |
-|----------|----------|---------|-------------|-------|
-| Single-Thread Read | 0.90 ns | 8.96 ns | **90% faster** | Pure read performance |
-| Single-Thread Write | 87.90 ns | 130.23 ns | **32% faster** | Improved epoch management |
-| Multi-Thread Read (2) | 0.90 ns | 9.37 ns | **90% faster** | No contention |
-| Multi-Thread Read (4) | 0.91 ns | 9.33 ns | **90% faster** | Consistent scaling |
-| Multi-Thread Read (8) | 0.93 ns | 9.63 ns | **90% faster** | Excellent scaling |
-| Mixed R/W (2 readers) | 93.21 ns | 446.45 ns | **79% faster** | 1 writer + 2 readers |
-| Mixed R/W (4 readers) | 92.89 ns | 451.09 ns | **79% faster** | 1 writer + 4 readers |
-| Mixed R/W (8 readers) | 93.85 ns | 493.12 ns | **81% faster** | 1 writer + 8 readers |
-| Batch Read | 1.62 ns | 9.91 ns | **84% faster** | Optimized batch reads |
-| Multi-Writer (4 readers) | 664.63 ns | 1.92 µs | **65% faster** | 4 writers + 4 readers (Mutex) |
-| Multi-Writer (8 readers) | 593.18 ns | 2.22 µs | **73% faster** | 4 writers + 8 readers (Mutex) |
-| Multi-Writer (16 readers) | 652.44 ns | 2.93 µs | **78% faster** | 4 writers + 16 readers (Mutex) |
-| Read with Held Guard | 89.91 ns | 908.69 ns | **90% faster** | Reader holds guard during write |
-| Read Under Memory Pressure | 741.47 ns | 1.58 µs | **53% faster** | Aggressive GC collection |
+Benchmark results comparing SMR-Swap against `arc-swap` (Windows, Bench mode, Intel Core i9-13900KS).
 
-### Detailed Performance Analysis
+### Benchmark Summary
 
-#### Single-Thread Read
-```
-smr-swap:  0.90 ns █
-arc-swap:  8.96 ns ██████████
-```
-**Winner**: SMR-Swap (90% faster)
-- Extremely fast read path with minimal overhead
-- Direct pointer access without atomic operations
-- Near-nanosecond latency
+| Scenario | SMR-Swap | ArcSwap | Improvement |
+|----------|----------|---------|-------------|
+| Single-Thread Read | 0.91 ns | 9.15 ns | **90% faster** |
+| Single-Thread Write | 108.81 ns | 131.43 ns | **17% faster** |
+| Multi-Thread Read (2) | 0.90 ns | 9.36 ns | **90% faster** |
+| Multi-Thread Read (4) | 0.90 ns | 9.30 ns | **90% faster** |
+| Multi-Thread Read (8) | 0.96 ns | 9.72 ns | **90% faster** |
+| Mixed R/W (1W+2R) | 108.16 ns | 451.72 ns | **76% faster** |
+| Mixed R/W (1W+4R) | 110.58 ns | 453.31 ns | **76% faster** |
+| Mixed R/W (1W+8R) | 104.38 ns | 528.70 ns | **80% faster** |
+| Batch Read | 1.64 ns | 9.92 ns | **83% faster** |
+| Read with Held Guard | 102.25 ns | 964.82 ns | **89% faster** |
+| Read Under Memory Pressure | 825.30 ns | 1.70 µs | **51% faster** |
 
-#### Single-Thread Write
-```
-smr-swap:  87.90 ns  ████████
-arc-swap:  130.23 ns █████████████
-```
-**Winner**: SMR-Swap (32% faster)
-- Improved epoch management efficiency
-- Excellent write performance despite GC overhead
+### Multi-Writer Multi-Reader (SMR-Swap wrapped in Mutex)
 
-#### Multi-Thread Read Performance (Scaling)
-```
-Readers:   2         4         8
-smr-swap:  0.90 ns   0.91 ns   0.93 ns
-arc-swap:  9.37 ns   9.33 ns   9.63 ns
-```
-**Analysis**: 
-- SMR-Swap maintains near-constant sub-nanosecond time regardless of thread count
-- 90% faster than arc-swap across all thread counts
-- Excellent scaling characteristics with virtually no contention
+| Config | SMR-Swap | Mutex | ArcSwap | Notes |
+|--------|----------|-------|---------|-------|
+| 4W+4R | 1.78 µs | 1.10 µs | 1.88 µs | SMR 5% faster than ArcSwap |
+| 4W+8R | 1.73 µs | 1.33 µs | 2.22 µs | SMR 22% faster than ArcSwap |
+| 4W+16R | 1.71 µs | 1.76 µs | 3.07 µs | SMR 44% faster than ArcSwap |
 
-#### Mixed Read-Write (Most Realistic Scenario)
-```
-Readers:   2         4         8
-smr-swap:  93 ns     93 ns     94 ns
-arc-swap:  446 ns    451 ns    493 ns
-```
-**Winner**: SMR-Swap (79-81% faster)
-- Consistent performance under load (93-94 ns across all thread counts)
-- Minimal impact from concurrent writers
-- ArcSwap shows increased latency with more readers (up to 493 ns)
-- Aggressive GC ensures stable performance
+### Analysis
 
-#### Multi-Writer Multi-Reader Performance
-```
-Config:    4W+4R     4W+8R     4W+16R
-smr-swap:  0.66 µs   0.59 µs   0.65 µs
-mutex:     1.07 µs   1.44 µs   2.04 µs
-arc-swap:  1.92 µs   2.22 µs   2.93 µs
-```
-**Winner**: SMR-Swap (65-78% faster than ArcSwap, 38-68% faster than Mutex)
-- SMR-Swap (wrapped in Mutex) outperforms both pure Mutex and ArcSwap
-- Pure Mutex performance degrades significantly as reader count increases (contention)
-- ArcSwap is the slowest in this workload
-- Demonstrates the efficiency of SMR-Swap's core mechanism even when wrapped in a lock
-
-#### Read Under Memory Pressure
-```
-smr-swap:  741 ns   ████
-arc-swap:  1580 ns  █████████
-```
-**Winner**: SMR-Swap (53% faster)
-- **Improved**: Aggressive garbage collection prevents garbage accumulation
-- Epoch-based reclamation is triggered immediately after each write
-- Consistent performance even under memory pressure
-
-#### Read Latency with Held Guard
-```
-smr-swap:  89.91 ns  ████
-arc-swap:  908.69 ns ██████████████████
-```
-**Winner**: SMR-Swap (90% faster)
-- Minimal overhead when readers hold guards
-- Critical for applications requiring long-lived read access
+- **Excellent Read Performance**: Sub-nanosecond latency (~0.9 ns) for both single and multi-thread reads, ~10x faster than ArcSwap
+- **Linear Scaling**: Multi-thread read performance remains nearly constant regardless of thread count
+- **Stable Mixed Workload**: Maintains ~105 ns latency under 1 writer + N readers scenarios
+- **Multi-Writer Scenarios**: Even with Mutex wrapping, outperforms ArcSwap with high reader counts
+- **Good Under Memory Pressure**: Aggressive GC ensures stable performance under memory pressure
 
 ## Design
 
-### Type System Guarantees
+### Single-Writer Multiple-Reader Pattern
 
-- **`Swapper<T>`**: Not `Clone`
-  - Guarantees single writer via type system
-  - Can be wrapped in `Mutex<Swapper<T>>` for multiple writers (but introduces lock contention)
+- **`SmrSwap<T>`** holds write capability, not `Clone`
+  - Single writer guaranteed by ownership system
+  - Wrap in `Mutex<SmrSwap<T>>` for multiple writers if needed
 
-- **`SwapReader<T>`**: `Send + Sync`, implements `Clone`
-  - Can be safely stored in structs
-  - Can be shared across threads via `&SwapReader<T>`
-  - Only exposes `handle()` method, ensuring each thread has its own `LocalEpoch`
-
-- **`ReaderHandle<T>`**: `Send` but not `Sync`
-  - Contains thread-local `LocalEpoch` for epoch protection
-  - Provides actual read methods
-  - Should not be shared across threads
+- **`LocalReader<T>`** is `Send` but not `Sync`
+  - Contains thread-local version information
+  - Each thread should have its own `LocalReader`
 
 ### Memory Management
 
-SMR-Swap uses a custom `swmr-epoch` library for memory reclamation, optimized for single-writer multiple-reader scenarios.
+SMR-Swap uses `swmr-cell` for version-based memory reclamation:
+- Old values are automatically queued for reclamation on write
+- Memory is reclaimed when no readers reference old values
+- Use `collect()` to manually trigger reclamation
 
 ## License
 
-Licensed under either of Apache License, Version 2.0 or MIT license at your option.
+This project is licensed under either of
+
+ * Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
