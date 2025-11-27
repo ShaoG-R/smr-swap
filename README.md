@@ -175,32 +175,32 @@ Benchmark results comparing SMR-Swap against `arc-swap` (Windows, Bench mode, In
 
 | Scenario | SMR-Swap | ArcSwap | Improvement |
 |----------|----------|---------|-------------|
-| Single-Thread Read | 0.91 ns | 9.15 ns | **90% faster** |
-| Single-Thread Write | 108.81 ns | 131.43 ns | **17% faster** |
-| Multi-Thread Read (2) | 0.90 ns | 9.36 ns | **90% faster** |
-| Multi-Thread Read (4) | 0.90 ns | 9.30 ns | **90% faster** |
-| Multi-Thread Read (8) | 0.96 ns | 9.72 ns | **90% faster** |
-| Mixed R/W (1W+2R) | 108.16 ns | 451.72 ns | **76% faster** |
-| Mixed R/W (1W+4R) | 110.58 ns | 453.31 ns | **76% faster** |
-| Mixed R/W (1W+8R) | 104.38 ns | 528.70 ns | **80% faster** |
-| Batch Read | 1.64 ns | 9.92 ns | **83% faster** |
-| Read with Held Guard | 102.25 ns | 964.82 ns | **89% faster** |
-| Read Under Memory Pressure | 825.30 ns | 1.70 µs | **51% faster** |
+| Single-Thread Read | 0.91 ns | 9.78 ns | **90% faster** |
+| Single-Thread Write | 89.51 ns | 127.47 ns | **30% faster** |
+| Multi-Thread Read (2) | 0.91 ns | 9.14 ns | **90% faster** |
+| Multi-Thread Read (4) | 0.92 ns | 9.64 ns | **90% faster** |
+| Multi-Thread Read (8) | 0.96 ns | 9.85 ns | **90% faster** |
+| Mixed R/W (1W+2R) | 87.63 ns | 457.74 ns | **81% faster** |
+| Mixed R/W (1W+4R) | 87.58 ns | 458.89 ns | **81% faster** |
+| Mixed R/W (1W+8R) | 88.07 ns | 497.94 ns | **82% faster** |
+| Batch Read | 1.65 ns | 9.56 ns | **83% faster** |
+| Read with Held Guard | 84.69 ns | 931.91 ns | **91% faster** |
+| Read Under Memory Pressure | 914.20 ns | 1.69 µs | **46% faster** |
 
 ### Multi-Writer Multi-Reader (SMR-Swap wrapped in Mutex)
 
 | Config | SMR-Swap | Mutex | ArcSwap | Notes |
 |--------|----------|-------|---------|-------|
-| 4W+4R | 1.78 µs | 1.10 µs | 1.88 µs | SMR 5% faster than ArcSwap |
-| 4W+8R | 1.73 µs | 1.33 µs | 2.22 µs | SMR 22% faster than ArcSwap |
-| 4W+16R | 1.71 µs | 1.76 µs | 3.07 µs | SMR 44% faster than ArcSwap |
+| 4W+4R | 542.29 ns | 1.13 µs | 1.96 µs | SMR 72% faster than ArcSwap |
+| 4W+8R | 566.80 ns | 1.44 µs | 2.18 µs | SMR 74% faster than ArcSwap |
+| 4W+16R | 548.84 ns | 1.87 µs | 2.89 µs | SMR 81% faster than ArcSwap |
 
 ### Analysis
 
 - **Excellent Read Performance**: Sub-nanosecond latency (~0.9 ns) for both single and multi-thread reads, ~10x faster than ArcSwap
 - **Linear Scaling**: Multi-thread read performance remains nearly constant regardless of thread count
-- **Stable Mixed Workload**: Maintains ~105 ns latency under 1 writer + N readers scenarios
-- **Multi-Writer Scenarios**: Even with Mutex wrapping, outperforms ArcSwap with high reader counts
+- **Stable Mixed Workload**: Maintains ~88 ns latency under 1 writer + N readers scenarios
+- **Excellent Multi-Writer Performance**: Even with Mutex wrapping, SMR-Swap is 72-81% faster than ArcSwap in multi-writer multi-reader scenarios
 - **Good Under Memory Pressure**: Aggressive GC ensures stable performance under memory pressure
 
 ## Design
