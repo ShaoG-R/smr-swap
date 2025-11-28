@@ -14,7 +14,7 @@ fn test_reader_map_int() {
     let result = reader.map(|x| x * 2);
     assert_eq!(result, 20);
 
-    swap.update(5);
+    swap.store(5);
     let result = reader.map(|x| x + 100);
     assert_eq!(result, 105);
 }
@@ -29,7 +29,7 @@ fn test_reader_map_string() {
     let result = reader.map(|s| s.len());
     assert_eq!(result, 5);
 
-    swap.update(String::from("world!"));
+    swap.store(String::from("world!"));
     let result = reader.map(|s| s.to_uppercase());
     assert_eq!(result, String::from("WORLD!"));
 }
@@ -44,7 +44,7 @@ fn test_reader_map_vector() {
     let result = reader.map(|v| v.len());
     assert_eq!(result, 3);
 
-    swap.update(vec![1, 2, 3, 4, 5]);
+    swap.store(vec![1, 2, 3, 4, 5]);
     let result = reader.map(|v| v.iter().sum::<i32>());
     assert_eq!(result, 15);
 }
@@ -60,7 +60,7 @@ fn test_reader_filter() {
     assert!(val.is_some());
     assert_eq!(*val.unwrap(), 10);
 
-    swap.update(3);
+    swap.store(3);
     let val = reader.filter(|x| x > &5);
     assert!(val.is_none());
 }
@@ -76,7 +76,7 @@ fn test_reader_filter_string() {
     assert!(val.is_some());
     assert_eq!(*val.unwrap(), "hello");
 
-    swap.update(String::from("hi"));
+    swap.store(String::from("hi"));
     let val = reader.filter(|s| s.len() > 3);
     assert!(val.is_none());
 }
@@ -92,7 +92,7 @@ fn test_reader_filter_vector() {
     assert!(val.is_some());
     assert_eq!(*val.unwrap(), vec![1, 2, 3, 4, 5]);
 
-    swap.update(vec![1, 2]);
+    swap.store(vec![1, 2]);
     let val = reader.filter(|v| v.len() > 3);
     assert!(val.is_none());
 }
@@ -160,7 +160,7 @@ fn test_writer_read() {
     assert_eq!(*val, 42);
     drop(val);
 
-    swap.update(100);
+    swap.store(100);
     assert_eq!(*swap.load(), 100);
     assert_eq!(*reader.load(), 100);
 }
@@ -176,7 +176,7 @@ fn test_writer_read_string() {
     assert_eq!(*val, "test");
     drop(val);
 
-    swap.update(String::from("updated"));
+    swap.store(String::from("updated"));
     assert_eq!(*swap.load(), "updated");
     assert_eq!(*reader.load(), "updated");
 }
@@ -195,7 +195,7 @@ fn test_chained_operations() {
     assert_eq!(result, 20);
     drop(guard);
 
-    swap.update(5);
+    swap.store(5);
     let guard = reader.load();
     let result = if *guard > 5 { *guard * 2 } else { 0 };
     assert_eq!(result, 0); // Value is 5, which is not > 5
@@ -227,7 +227,7 @@ fn test_map_complex_transformation() {
     let result = reader.map(|v| v.iter().filter(|x| *x % 2 == 0).map(|x| x * 2).sum::<i32>());
     assert_eq!(result, 12); // (2*2 + 4*2) = 12
 
-    swap.update(vec![10, 20, 30]);
+    swap.store(vec![10, 20, 30]);
     let result = reader.map(|v| v.iter().sum::<i32>());
     assert_eq!(result, 60);
 }
@@ -242,7 +242,7 @@ fn test_filter_complex_condition() {
     let val = reader.filter(|s| s.len() > 3 && s.contains('l'));
     assert!(val.is_some());
 
-    swap.update(String::from("hi"));
+    swap.store(String::from("hi"));
     let val = reader.filter(|s| s.len() > 3 && s.contains('l'));
     assert!(val.is_none());
 }
@@ -279,7 +279,7 @@ fn test_map_with_none_value() {
     assert_eq!(result, 42);
 
     // Map on None (after update)
-    swap.update(None::<i32>);
+    swap.store(None::<i32>);
     let result = reader.map(|opt| opt.unwrap_or(0));
     assert_eq!(result, 0);
 }

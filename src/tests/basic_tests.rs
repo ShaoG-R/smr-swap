@@ -31,41 +31,41 @@ fn test_basic_new_and_read_vector() {
     assert_eq!(*guard, vec![1, 2, 3, 4, 5]);
 }
 
-/// Test basic update operation with integers
-/// 测试基本的更新操作（整数）
+/// Test basic store operation with integers
+/// 测试基本的存储操作（整数）
 #[test]
-fn test_basic_update_int() {
+fn test_basic_store_int() {
     let mut swap = SmrSwap::new(10);
     let reader = swap.local();
 
     assert_eq!(*reader.load(), 10);
 
-    swap.update(20);
+    swap.store(20);
     assert_eq!(*reader.load(), 20);
 }
 
-/// Test basic update operation with strings
-/// 测试基本的更新操作（字符串）
+/// Test basic store operation with strings
+/// 测试基本的存储操作（字符串）
 #[test]
-fn test_basic_update_string() {
+fn test_basic_store_string() {
     let mut swap = SmrSwap::new(String::from("hello"));
     let reader = swap.local();
 
     assert_eq!(*reader.load(), "hello");
 
-    swap.update(String::from("world"));
+    swap.store(String::from("world"));
     assert_eq!(*reader.load(), "world");
 }
 
-/// Test multiple sequential updates
-/// 测试多个连续的更新
+/// Test multiple sequential stores
+/// 测试多个连续的存储
 #[test]
-fn test_multiple_updates() {
+fn test_multiple_stores() {
     let mut swap = SmrSwap::new(0);
     let reader = swap.local();
 
     for i in 1..=10 {
-        swap.update(i);
+        swap.store(i);
         assert_eq!(*reader.load(), i);
     }
 }
@@ -81,7 +81,7 @@ fn test_reader_clone_int() {
     assert_eq!(*reader1.load(), 10);
     assert_eq!(*reader2.load(), 10);
 
-    swap.update(20);
+    swap.store(20);
 
     assert_eq!(*reader1.load(), 20);
     assert_eq!(*reader2.load(), 20);
@@ -100,7 +100,7 @@ fn test_reader_clone_string() {
     assert_eq!(*reader2.load(), "initial");
     assert_eq!(*reader3.load(), "initial");
 
-    swap.update(String::from("updated"));
+    swap.store(String::from("updated"));
 
     assert_eq!(*reader1.load(), "updated");
     assert_eq!(*reader2.load(), "updated");
@@ -122,9 +122,9 @@ fn test_multiple_readers_consistency() {
     assert_eq!(*reader2.load(), 0);
     assert_eq!(*reader3.load(), 0);
 
-    // Update the value
-    // 更新值
-    swap.update(1);
+    // Store a new value
+    // 存储新值
+    swap.store(1);
 
     // All readers should see the same updated value
     // 所有读取者应该看到相同的更新值
@@ -132,9 +132,9 @@ fn test_multiple_readers_consistency() {
     assert_eq!(*reader2.load(), 1);
     assert_eq!(*reader3.load(), 1);
 
-    // Update again
-    // 再次更新
-    swap.update(2);
+    // Store again
+    // 再次存储
+    swap.store(2);
 
     // All readers should see the same new value
     // 所有读取者应该看到相同的新值
@@ -153,7 +153,7 @@ fn test_read_guard_holds_value() {
     let guard1 = reader.load();
     assert_eq!(*guard1, 10);
 
-    swap.update(20);
+    swap.store(20);
 
     let guard2 = reader.load();
     assert_eq!(*guard2, 20);
@@ -165,7 +165,7 @@ fn test_read_guard_holds_value() {
     drop(guard2);
     drop(guard1);
 
-    swap.update(30);
+    swap.store(30);
     assert_eq!(*reader.load(), 30);
 }
 
@@ -188,9 +188,9 @@ fn test_multiple_held_guards() {
     assert_eq!(*guard2, 0);
     assert_eq!(*guard3, 0);
 
-    // Update the value
-    // 更新值
-    swap.update(1);
+    // Store a new value
+    // 存储新值
+    swap.store(1);
 
     // Old guards should still be valid
     // 旧的守卫应该仍然有效
@@ -227,7 +227,7 @@ fn test_with_boxed_values() {
     assert_eq!(**guard, 42);
     drop(guard);
 
-    swap.update(Box::new(100));
+    swap.store(Box::new(100));
     assert_eq!(**reader.load(), 100);
 }
 
@@ -243,7 +243,7 @@ fn test_with_arc_values() {
     let guard1 = reader.load();
     assert_eq!(**guard1, 42);
 
-    swap.update(Arc::new(100));
+    swap.store(Arc::new(100));
     let guard2 = reader.load();
     assert_eq!(**guard2, 100);
 }
@@ -259,8 +259,8 @@ fn test_map() {
     let doubled = reader.map(|val| *val * 2);
     assert_eq!(doubled, 20);
 
-    // Update the value
-    swap.update(20);
+    // Store a new value
+    swap.store(20);
 
     // Map the new value
     let tripled = reader.map(|val| *val * 3);
@@ -278,8 +278,8 @@ fn test_filter() {
     let val = reader.filter(|val| val.is_some()).unwrap();
     assert_eq!(*val, Some(42));
 
-    // Update to None
-    swap.update(None::<i32>);
+    // Store None
+    swap.store(None::<i32>);
 
     // Filter with None
     let result = reader.filter(|val| val.is_some());
@@ -334,7 +334,7 @@ fn test_manual_collect() {
     let mut swap = SmrSwap::new(0);
 
     for i in 1..=100 {
-        swap.update(i);
+        swap.store(i);
     }
 
     // Manual collect should not panic
@@ -351,6 +351,169 @@ fn test_smrswap_load() {
 
     assert_eq!(*swap.load(), 42);
 
-    swap.update(100);
+    swap.store(100);
     assert_eq!(*swap.load(), 100);
+}
+
+/// Test update with closure
+/// 测试使用闭包更新
+#[test]
+fn test_update_with_closure() {
+    let mut swap = SmrSwap::new(10);
+    let reader = swap.local();
+
+    swap.update(|val| val + 5);
+    assert_eq!(*reader.load(), 15);
+
+    swap.update(|val| val * 2);
+    assert_eq!(*reader.load(), 30);
+}
+
+/// Test get method (writer-only)
+/// 测试 get 方法（仅写者）
+#[test]
+fn test_get() {
+    let mut swap = SmrSwap::new(42);
+
+    assert_eq!(*swap.get(), 42);
+
+    swap.store(100);
+    assert_eq!(*swap.get(), 100);
+}
+
+/// Test version tracking
+/// 测试版本跟踪
+#[test]
+fn test_version() {
+    let mut swap = SmrSwap::new(0);
+    let reader = swap.local();
+
+    let v0 = swap.version();
+
+    swap.store(1);
+    let v1 = swap.version();
+    assert!(v1 > v0);
+
+    swap.store(2);
+    let v2 = swap.version();
+    assert!(v2 > v1);
+
+    // Reader version should match
+    assert_eq!(reader.version(), v2);
+}
+
+/// Test garbage_count
+/// 测试 garbage_count
+#[test]
+fn test_garbage_count() {
+    let mut swap = SmrSwap::new(0);
+
+    assert_eq!(swap.garbage_count(), 0);
+
+    swap.store(1);
+}
+
+/// Test previous value
+/// 测试上一个值
+#[test]
+fn test_previous() {
+    let mut swap = SmrSwap::new(1);
+
+    assert!(swap.previous().is_none()); // No previous value yet
+
+    swap.store(2);
+    assert_eq!(swap.previous(), Some(&1));
+
+    swap.store(3);
+    assert_eq!(swap.previous(), Some(&2));
+}
+
+/// Test fetch_and_update
+/// 测试 fetch_and_update
+#[test]
+fn test_fetch_and_update() {
+    let mut swap = SmrSwap::new(10);
+    let reader = swap.local();
+
+    let old_guard = swap.fetch_and_update(|val| val + 5);
+    assert_eq!(*old_guard, 10); // Returns old value
+    assert_eq!(*reader.load(), 15); // New value
+}
+
+/// Test Default trait
+/// 测试 Default trait
+#[test]
+fn test_default() {
+    let swap: SmrSwap<i32> = SmrSwap::default();
+    assert_eq!(*swap.get(), 0);
+
+    let swap: SmrSwap<String> = SmrSwap::default();
+    assert_eq!(*swap.get(), "");
+}
+
+/// Test From trait
+/// 测试 From trait
+#[test]
+fn test_from() {
+    let swap: SmrSwap<i32> = SmrSwap::from(42);
+    assert_eq!(*swap.get(), 42);
+
+    let swap: SmrSwap<String> = SmrSwap::from(String::from("hello"));
+    assert_eq!(*swap.get(), "hello");
+}
+
+/// Test Debug trait
+/// 测试 Debug trait
+#[test]
+fn test_debug() {
+    let swap = SmrSwap::new(42);
+    let debug_str = format!("{:?}", swap);
+    assert!(debug_str.contains("SmrSwap"));
+    assert!(debug_str.contains("42"));
+
+    let reader = swap.local();
+    let debug_str = format!("{:?}", reader);
+    assert!(debug_str.contains("LocalReader"));
+
+    let guard = reader.load();
+    let debug_str = format!("{:?}", guard);
+    assert!(debug_str.contains("ReadGuard"));
+    assert!(debug_str.contains("42"));
+}
+
+/// Test ReadGuard version
+/// 测试 ReadGuard 版本
+#[test]
+fn test_read_guard_version() {
+    let mut swap = SmrSwap::new(0);
+    let reader = swap.local();
+
+    let guard1 = reader.load();
+    let v1 = guard1.version();
+
+    swap.store(1);
+
+    let guard2 = reader.load();
+    let v2 = guard2.version();
+
+    // guard1 should still have the old version
+    assert_eq!(guard1.version(), v1);
+    // guard2 should have same version
+    assert!(v2 == v1);
+}
+
+/// Test is_pinned
+/// 测试 is_pinned
+#[test]
+fn test_is_pinned() {
+    let swap = SmrSwap::new(0);
+    let reader = swap.local();
+
+    assert!(!reader.is_pinned());
+
+    let guard = reader.load();
+    assert!(reader.is_pinned());
+
+    drop(guard);
+    assert!(!reader.is_pinned());
 }

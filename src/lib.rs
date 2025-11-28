@@ -14,8 +14,8 @@
 //! // Get a thread-local reader
 //! let local = swap.local();
 //!
-//! // Writer updates the value
-//! swap.update(1);
+//! // Writer stores a new value
+//! swap.store(1);
 //!
 //! // Read in another thread
 //! let local2 = swap.local();
@@ -27,6 +27,7 @@
 //! handle.join().unwrap();
 //! ```
 
+use std::fmt;
 use std::ops::Deref;
 use swmr_cell::SwmrCell;
 
@@ -120,16 +121,77 @@ impl<T: 'static> SmrSwap<T> {
         }
     }
 
-    /// Perform a write operation to update the current value.
+    /// Store a new value, making it visible to readers.
     ///
     /// The old value is retired and will be garbage collected when safe.
     ///
-    /// 执行写入操作，更新当前值。
+    /// 存储新值，使其对读者可见。
     ///
     /// 旧值已退休，将在安全时被垃圾回收。
     #[inline]
-    pub fn update(&mut self, new_value: T) {
+    pub fn store(&mut self, new_value: T) {
         self.cell.store(new_value);
+    }
+
+    /// Get a reference to the current value (writer-only, no pinning required).
+    ///
+    /// This is only accessible from the writer thread since `SmrSwap` is `!Sync`.
+    ///
+    /// 获取当前值的引用（仅写者可用，无需 pin）。
+    ///
+    /// 这只能从写者线程访问，因为 `SmrSwap` 是 `!Sync` 的。
+    #[inline]
+    pub fn get(&self) -> &T {
+        self.cell.get()
+    }
+
+    /// Update the value using a closure.
+    ///
+    /// The closure receives the current value and should return the new value.
+    /// This is equivalent to `swap.store(f(swap.get()))` but more ergonomic.
+    ///
+    /// 使用闭包更新值。
+    ///
+    /// 闭包接收当前值并应返回新值。
+    /// 这相当于 `swap.store(f(swap.get()))` 但更符合人体工程学。
+    #[inline]
+    pub fn update<F>(&mut self, f: F)
+    where
+        F: FnOnce(&T) -> T,
+    {
+        self.cell.update(f);
+    }
+
+    /// Get the current global version.
+    ///
+    /// The version is incremented each time `store()` is called.
+    ///
+    /// 获取当前全局版本。
+    ///
+    /// 每次调用 `store()` 时版本会增加。
+    #[inline]
+    pub fn version(&self) -> usize {
+        self.cell.version()
+    }
+
+    /// Get the number of retired objects waiting for garbage collection.
+    ///
+    /// 获取等待垃圾回收的已退休对象数量。
+    #[inline]
+    pub fn garbage_count(&self) -> usize {
+        self.cell.garbage_count()
+    }
+
+    /// Get a reference to the previously stored value, if any.
+    ///
+    /// Returns `None` if no previous value exists (i.e., only the initial value has been stored).
+    ///
+    /// 获取上一个存储值的引用（如果存在）。
+    ///
+    /// 如果不存在上一个值（即只存储了初始值），则返回 `None`。
+    #[inline]
+    pub fn previous(&self) -> Option<&T> {
+        self.cell.previous()
     }
 
     /// Manually trigger garbage collection.
@@ -170,7 +232,7 @@ impl<T: 'static> SmrSwap<T> {
     where
         T: Clone,
     {
-        let old_value = (*self.local.load()).clone();
+        let old_value = self.cell.get().clone();
         self.cell.store(new_value);
         old_value
     }
@@ -189,11 +251,29 @@ impl<T: 'static> SmrSwap<T> {
     where
         F: FnOnce(&T) -> T,
     {
-        let old_val = self.local.load();
-        let new_value = f(&*old_val);
-        drop(old_val);
+        let new_value = f(self.cell.get());
         self.cell.store(new_value);
         self.local.load()
+    }
+
+    /// Apply a closure function to the current value with mutable access to both.
+    ///
+    /// The closure receives the current value and should return the new value.
+    /// Returns a guard to the old value (before update).
+    ///
+    /// 对当前值应用闭包函数，具有对两者的可变访问。
+    ///
+    /// 闭包接收当前值并应返回新值。
+    /// 返回旧值（更新前）的守卫。
+    #[inline]
+    pub fn fetch_and_update<F>(&mut self, f: F) -> ReadGuard<'_, T>
+    where
+        F: FnOnce(&T) -> T,
+    {
+        let old_guard = self.local.load();
+        let new_value = f(self.cell.get());
+        self.cell.store(new_value);
+        old_guard
     }
 }
 
@@ -216,6 +296,28 @@ impl<T: 'static> LocalReader<T> {
         ReadGuard {
             inner: self.inner.pin(),
         }
+    }
+
+    /// Check if this reader is currently pinned.
+    ///
+    /// 检查此读者当前是否被 pin。
+    #[inline]
+    pub fn is_pinned(&self) -> bool {
+        self.inner.is_pinned()
+    }
+
+    /// Get the current global version.
+    ///
+    /// Note: This returns the global version, not the pinned version.
+    /// To get the pinned version, use `ReadGuard::version()`.
+    ///
+    /// 获取当前全局版本。
+    ///
+    /// 注意：这返回全局版本，而不是 pin 的版本。
+    /// 要获取 pin 的版本，请使用 `ReadGuard::version()`。
+    #[inline]
+    pub fn version(&self) -> usize {
+        self.inner.version()
     }
 
     /// Apply a closure function to the current value and transform the result.
@@ -258,6 +360,83 @@ impl<T: 'static> Clone for LocalReader<T> {
         LocalReader {
             inner: self.inner.clone(),
         }
+    }
+}
+
+impl<T: 'static> fmt::Debug for LocalReader<T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LocalReader")
+            .field("is_pinned", &self.is_pinned())
+            .field("version", &self.version())
+            .finish()
+    }
+}
+
+// ============================================================================
+// ReadGuard additional implementations
+// ============================================================================
+
+impl<T: 'static> ReadGuard<'_, T> {
+    /// Get the version that this guard is pinned to.
+    ///
+    /// 获取此守卫被 pin 到的版本。
+    #[inline]
+    pub fn version(&self) -> usize {
+        self.inner.version()
+    }
+}
+
+impl<T: 'static> AsRef<T> for ReadGuard<'_, T> {
+    #[inline]
+    fn as_ref(&self) -> &T {
+        self.deref()
+    }
+}
+
+impl<T: fmt::Debug + 'static> fmt::Debug for ReadGuard<'_, T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadGuard")
+            .field("value", &self.deref())
+            .field("version", &self.version())
+            .finish()
+    }
+}
+
+// ============================================================================
+// Standard Trait Implementations
+// 标准 trait 实现
+// ============================================================================
+
+impl<T: Default + 'static> Default for SmrSwap<T> {
+    /// Create a new SmrSwap with the default value.
+    ///
+    /// 使用默认值创建一个新的 SmrSwap。
+    #[inline]
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
+impl<T: 'static> From<T> for SmrSwap<T> {
+    /// Create a new SmrSwap from a value.
+    ///
+    /// 从一个值创建一个新的 SmrSwap。
+    #[inline]
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
+impl<T: fmt::Debug + 'static> fmt::Debug for SmrSwap<T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SmrSwap")
+            .field("value", self.get())
+            .field("version", &self.version())
+            .field("garbage_count", &self.garbage_count())
+            .finish()
     }
 }
 

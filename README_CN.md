@@ -24,7 +24,7 @@
 
 ```toml
 [dependencies]
-smr-swap = "0.7"
+smr-swap = "0.8"
 ```
 
 ### 基本用法
@@ -40,8 +40,8 @@ fn main() {
     // 为当前线程获取本地读取句柄
     let local = swap.local();
 
-    // 写入者更新值
-    swap.update(1);
+    // 写入者存储新值
+    swap.store(1);
 
     // 在另一个线程中读取
     let local2 = swap.local();
@@ -77,8 +77,8 @@ fn main() {
         })
         .collect();
 
-    // 写入者更新值
-    swap.update(vec![4, 5, 6]);
+    // 写入者存储新值
+    swap.store(vec![4, 5, 6]);
 
     for handle in handles {
         handle.join().unwrap();
@@ -120,9 +120,9 @@ fn main() {
 
 | 类型 | 角色 | 关键方法 |
 |------|------|--------|
-| `SmrSwap<T>` | 主容器，持有数据和写入能力 | `new()`, `update()`, `load()`, `local()`, `swap()` |
-| `LocalReader<T>` | 线程本地读取句柄 | `load()`, `map()`, `filter()` |
-| `ReadGuard<'a, T>` | RAII 守卫，保护读取期间的数据 | `Deref` |
+| `SmrSwap<T>` | 主容器，持有数据和写入能力 | `new()`, `store()`, `get()`, `load()`, `local()`, `swap()` |
+| `LocalReader<T>` | 线程本地读取句柄 | `load()`, `map()`, `filter()`, `is_pinned()`, `version()` |
+| `ReadGuard<'a, T>` | RAII 守卫，保护读取期间的数据 | `Deref`, `AsRef`, `version()` |
 
 ```
 SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
@@ -146,10 +146,16 @@ SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
 |------|------|
 | `new(initial: T)` | 创建新容器 |
 | `local() -> LocalReader<T>` | 创建线程本地的读取句柄 |
-| `update(new_value: T)` | 更新值，旧值会被安全回收 |
+| `store(new_value: T)` | 存储新值，旧值会被安全回收 |
+| `get() -> &T` | 获取当前值的引用（仅写者，无需 pin） |
+| `update(f: FnOnce(&T) -> T)` | 使用闭包更新值 |
 | `load() -> ReadGuard<T>` | 使用内部句柄读取当前值 |
 | `swap(new_value: T) -> T` | 交换值并返回旧值（需要 `T: Clone`） |
 | `update_and_fetch(f) -> ReadGuard<T>` | 应用闭包更新值并返回新值的守卫 |
+| `fetch_and_update(f) -> ReadGuard<T>` | 应用闭包更新值并返回旧值的守卫 |
+| `version() -> usize` | 获取当前全局版本 |
+| `garbage_count() -> usize` | 获取等待回收的垃圾数量 |
+| `previous() -> Option<&T>` | 获取上一个存储值的引用 |
 | `collect()` | 手动触发垃圾回收 |
 
 ### `LocalReader<T>`
@@ -161,11 +167,26 @@ SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
 | `load() -> ReadGuard<T>` | 读取当前值，返回 RAII 守卫 |
 | `map<F, U>(f: F) -> U` | 对值应用函数并返回结果 |
 | `filter<F>(f: F) -> Option<ReadGuard<T>>` | 条件性返回守卫 |
+| `is_pinned() -> bool` | 检查此读者是否当前被 pin |
+| `version() -> usize` | 获取当前全局版本 |
 | `clone()` | 创建新的 `LocalReader` |
 
 ### `ReadGuard<'a, T>`
 
-RAII 守卫，实现 `Deref<Target = T>`，在守卫存活期间保护数据不被回收。
+RAII 守卫，实现 `Deref<Target = T>` 和 `AsRef<T>`，在守卫存活期间保护数据不被回收。
+
+| 方法 | 描述 |
+|------|------|
+| `version() -> usize` | 获取此守卫被 pin 到的版本 |
+| `clone()` | 克隆守卫（增加 pin 计数） |
+
+### 标准 Trait 实现
+
+| 类型 | Trait |
+|------|-------|
+| `SmrSwap<T>` | `Default` (要求 `T: Default`), `From<T>`, `Debug` (要求 `T: Debug`) |
+| `LocalReader<T>` | `Clone`, `Send`, `Debug` |
+| `ReadGuard<'a, T>` | `Deref`, `AsRef`, `Clone`, `Debug` (要求 `T: Debug`) |
 
 ## 性能对比
 

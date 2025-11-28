@@ -47,7 +47,7 @@ fn bench_single_thread_write(c: &mut Criterion) {
         let mut counter = 0;
         b.iter(|| {
             counter += 1;
-            swap.update(vec![counter; 1000]);
+            swap.store(vec![counter; 1000]);
         });
     });
 
@@ -156,7 +156,7 @@ fn bench_mixed_read_write(c: &mut Criterion) {
                         // 写入者线程
                         s.spawn(|| {
                             for i in 0..iters {
-                                swap.update(vec![i as u32; 1000]);
+                                swap.store(vec![i as u32; 1000]);
                             }
                         });
 
@@ -244,7 +244,7 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
                             let swap_clone = swap.clone();
                             s.spawn(move || {
                                 for i in 0..iters {
-                                    swap_clone.lock().unwrap().update(vec![i as u32; 1000]);
+                                    swap_clone.lock().unwrap().store(vec![i as u32; 1000]);
                                 }
                             });
                         }
@@ -365,7 +365,7 @@ fn bench_read_latency_with_held_guard(c: &mut Criterion) {
 
                 // 写入者尝试写入
                 for i in 0..iters {
-                    swap.update(vec![i as u32; 1000]);
+                    swap.store(vec![i as u32; 1000]);
                 }
             });
             start.elapsed()
@@ -474,7 +474,7 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
 
         // 预先进行大量写入以积累垃圾
         for i in 0..1000 {
-            swap.update(vec![i; 10000]);
+            swap.store(vec![i; 10000]);
         }
 
         b.iter_custom(|iters| {
@@ -491,7 +491,7 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
 
                 // 同时进行写入
                 for i in 0..iters {
-                    swap.update(vec![i as u32; 10000]);
+                    swap.store(vec![i as u32; 10000]);
                 }
             });
             start.elapsed()

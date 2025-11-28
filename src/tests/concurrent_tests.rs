@@ -21,7 +21,7 @@ fn test_concurrent_stress() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=num_updates {
-                swap.update(Box::new(i));
+                swap.store(Box::new(i));
             }
         });
 
@@ -55,7 +55,7 @@ fn test_concurrent_multiple_readers() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=num_updates {
-                swap.update(i);
+                swap.store(i);
             }
         });
 
@@ -121,7 +121,7 @@ fn test_concurrent_readers_with_held_guards() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=num_updates {
-                swap.update(i);
+                swap.store(i);
             }
         });
 
@@ -155,7 +155,7 @@ fn test_reader_holds_guard_during_updates() {
         let b_writer = barrier.clone();
         s.spawn(move || {
             for i in 1..=num_updates {
-                swap.update(i);
+                swap.store(i);
             }
             // Wait for reader to finish before exiting
             b_writer.wait();
@@ -194,7 +194,7 @@ fn test_many_concurrent_readers_frequent_updates() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=num_updates {
-                swap.update(i);
+                swap.store(i);
             }
         });
 
@@ -226,7 +226,7 @@ fn test_rapid_reader_cloning() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=50 {
-                swap.update(i);
+                swap.store(i);
                 thread::yield_now();
             }
         });
@@ -255,7 +255,7 @@ fn test_reader_consistency_concurrent_updates() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=num_updates {
-                swap.update(vec![i]);
+                swap.store(vec![i]);
             }
         });
 
@@ -289,7 +289,7 @@ fn test_synchronization_with_barrier() {
         s.spawn(move || {
             b.wait();
             for i in 1..=20 {
-                swap.update(i);
+                swap.store(i);
             }
         });
 
@@ -318,7 +318,7 @@ fn test_concurrent_string_values() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=num_updates {
-                swap.update(format!("value_{}", i));
+                swap.store(format!("value_{}", i));
             }
         });
 
@@ -351,7 +351,7 @@ fn test_guard_validity_across_updates() {
 
     // Update multiple times
     for i in 1..=10 {
-        swap.update(i);
+        swap.store(i);
 
         // Old guard should still be valid
         assert_eq!(*guard_v0, 0);
@@ -379,7 +379,7 @@ fn test_concurrent_guard_holding() {
         s.spawn(move || {
             b.wait();
             for i in 1..=100 {
-                swap.update(i);
+                swap.store(i);
             }
         });
 

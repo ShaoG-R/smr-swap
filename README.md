@@ -24,7 +24,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-smr-swap = "0.7"
+smr-swap = "0.8"
 ```
 
 ### Basic Usage
@@ -40,8 +40,8 @@ fn main() {
     // Get a thread-local reader
     let local = swap.local();
 
-    // Writer updates the value
-    swap.update(1);
+    // Writer stores a new value
+    swap.store(1);
 
     // Read in another thread
     let local2 = swap.local();
@@ -77,8 +77,8 @@ fn main() {
         })
         .collect();
 
-    // Writer updates the value
-    swap.update(vec![4, 5, 6]);
+    // Writer stores a new value
+    swap.store(vec![4, 5, 6]);
 
     for handle in handles {
         handle.join().unwrap();
@@ -120,9 +120,9 @@ fn main() {
 
 | Type | Role | Key Methods |
 |------|------|-------------|
-| `SmrSwap<T>` | Main container, holds data and write capability | `new()`, `update()`, `load()`, `local()`, `swap()` |
-| `LocalReader<T>` | Thread-local read handle | `load()`, `map()`, `filter()` |
-| `ReadGuard<'a, T>` | RAII guard, protects data during read | `Deref` |
+| `SmrSwap<T>` | Main container, holds data and write capability | `new()`, `store()`, `get()`, `load()`, `local()`, `swap()` |
+| `LocalReader<T>` | Thread-local read handle | `load()`, `map()`, `filter()`, `is_pinned()`, `version()` |
+| `ReadGuard<'a, T>` | RAII guard, protects data during read | `Deref`, `AsRef`, `version()` |
 
 ```
 SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
@@ -146,10 +146,16 @@ Main entry point, holds data and write capability.
 |--------|-------------|
 | `new(initial: T)` | Create a new container |
 | `local() -> LocalReader<T>` | Create a thread-local read handle |
-| `update(new_value: T)` | Update the value, old value will be safely reclaimed |
+| `store(new_value: T)` | Store a new value, old value will be safely reclaimed |
+| `get() -> &T` | Get reference to current value (writer-only, no pin required) |
+| `update(f: FnOnce(&T) -> T)` | Update value using a closure |
 | `load() -> ReadGuard<T>` | Read current value using internal handle |
 | `swap(new_value: T) -> T` | Swap value and return old value (requires `T: Clone`) |
 | `update_and_fetch(f) -> ReadGuard<T>` | Apply closure to update and return guard to new value |
+| `fetch_and_update(f) -> ReadGuard<T>` | Apply closure to update and return guard to old value |
+| `version() -> usize` | Get current global version |
+| `garbage_count() -> usize` | Get number of objects waiting for garbage collection |
+| `previous() -> Option<&T>` | Get reference to previously stored value |
 | `collect()` | Manually trigger garbage collection |
 
 ### `LocalReader<T>`
@@ -161,11 +167,26 @@ Thread-local read handle.
 | `load() -> ReadGuard<T>` | Read current value, returns RAII guard |
 | `map<F, U>(f: F) -> U` | Apply function to value and return result |
 | `filter<F>(f: F) -> Option<ReadGuard<T>>` | Conditionally return a guard |
+| `is_pinned() -> bool` | Check if this reader is currently pinned |
+| `version() -> usize` | Get current global version |
 | `clone()` | Create a new `LocalReader` |
 
 ### `ReadGuard<'a, T>`
 
-RAII guard, implements `Deref<Target = T>`, protects data from reclamation while guard is alive.
+RAII guard, implements `Deref<Target = T>` and `AsRef<T>`, protects data from reclamation while guard is alive.
+
+| Method | Description |
+|--------|-------------|
+| `version() -> usize` | Get the version this guard is pinned to |
+| `clone()` | Clone the guard (increments pin count) |
+
+### Standard Trait Implementations
+
+| Type | Traits |
+|------|--------|
+| `SmrSwap<T>` | `Default` (requires `T: Default`), `From<T>`, `Debug` (requires `T: Debug`) |
+| `LocalReader<T>` | `Clone`, `Send`, `Debug` |
+| `ReadGuard<'a, T>` | `Deref`, `AsRef`, `Clone`, `Debug` (requires `T: Debug`) |
 
 ## Performance
 
