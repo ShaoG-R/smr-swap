@@ -196,44 +196,44 @@ Benchmark results comparing SMR-Swap against `arc-swap` (Windows, Bench mode, In
 
 | Scenario | SMR-Swap | ArcSwap | Improvement |
 |----------|----------|---------|-------------|
-| Single-Thread Read | 0.91 ns | 9.78 ns | **90% faster** |
-| Single-Thread Write | 89.51 ns | 127.47 ns | **30% faster** |
-| Multi-Thread Read (2) | 0.91 ns | 9.14 ns | **90% faster** |
-| Multi-Thread Read (4) | 0.92 ns | 9.64 ns | **90% faster** |
-| Multi-Thread Read (8) | 0.96 ns | 9.85 ns | **90% faster** |
-| Mixed R/W (1W+2R) | 87.63 ns | 457.74 ns | **81% faster** |
-| Mixed R/W (1W+4R) | 87.58 ns | 458.89 ns | **81% faster** |
-| Mixed R/W (1W+8R) | 88.07 ns | 497.94 ns | **82% faster** |
-| Batch Read | 1.65 ns | 9.56 ns | **83% faster** |
-| Read with Held Guard | 84.69 ns | 931.91 ns | **91% faster** |
-| Read Under Memory Pressure | 914.20 ns | 1.69 µs | **46% faster** |
+| Single-Thread Read | 0.90 ns | 9.20 ns | **90% faster** |
+| Single-Thread Write | 66.61 ns | 104.97 ns | **37% faster** |
+| Multi-Thread Read (2) | 0.90 ns | 9.24 ns | **90% faster** |
+| Multi-Thread Read (4) | 0.94 ns | 9.47 ns | **90% faster** |
+| Multi-Thread Read (8) | 0.93 ns | 9.75 ns | **90% faster** |
+| Mixed R/W (1W+2R) | 56.36 ns | 426.24 ns | **87% faster** |
+| Mixed R/W (1W+4R) | 56.52 ns | 428.05 ns | **87% faster** |
+| Mixed R/W (1W+8R) | 58.21 ns | 509.31 ns | **89% faster** |
+| Batch Read | 1.63 ns | 10.19 ns | **84% faster** |
+| Read with Held Guard | 54.57 ns | 891.63 ns | **94% faster** |
+| Read Under Memory Pressure | 873.52 ns | 1.63 µs | **46% faster** |
 
 ### Single-Writer Read/Write Ratio (1 Writer + 2 Readers)
 
-| R/W Ratio | SMR-Swap | ArcSwap | Mutex | Notes |
-|-----------|----------|---------|-------|-------|
-| 100:1 | 168.00 ns | 1.18 µs | 6.96 µs | SMR 86% faster than ArcSwap, 98% faster than Mutex |
-| 10:1 | 93.70 ns | 333.72 ns | 951.22 ns | SMR 72% faster than ArcSwap, 90% faster than Mutex |
-| 1:1 | 87.41 ns | 255.29 ns | 155.28 ns | SMR 66% faster than ArcSwap, 44% faster than Mutex |
-| 1:10 | 849.17 ns | 2.87 µs | 620.80 ns | SMR 70% faster than ArcSwap, Mutex 27% faster than SMR |
-| 1:100 | 8.79 µs | 28.61 µs | 5.26 µs | SMR 69% faster than ArcSwap, Mutex 40% faster than SMR |
+| R/W Ratio | SMR-Swap | Mutex | Notes |
+|-----------|----------|-------|-------|
+| 100:1 | 171.54 ns | 6.15 µs | SMR 97% faster than Mutex |
+| 10:1 | 67.64 ns | 739.97 ns | SMR 91% faster than Mutex |
+| 1:1 | 55.96 ns | 145.27 ns | SMR 61% faster than Mutex |
+| 1:10 | 554.74 ns | 231.97 ns | Mutex 58% faster than SMR |
+| 1:100 | 5.90 µs | 1.13 µs | Mutex 81% faster than SMR |
 
 ### Multi-Writer Multi-Reader (SMR-Swap wrapped in Mutex)
 
 | Config | SMR-Swap | Mutex | ArcSwap | Notes |
 |--------|----------|-------|---------|-------|
-| 4W+4R | 542.29 ns | 1.13 µs | 1.96 µs | SMR 72% faster than ArcSwap |
-| 4W+8R | 566.80 ns | 1.44 µs | 2.18 µs | SMR 74% faster than ArcSwap |
-| 4W+16R | 548.84 ns | 1.87 µs | 2.89 µs | SMR 81% faster than ArcSwap |
+| 4W+4R | 559.87 ns | 503.32 ns | 1.85 µs | SMR 70% faster than ArcSwap |
+| 4W+8R | 564.80 ns | 825.97 ns | 2.17 µs | SMR 74% faster than ArcSwap |
+| 4W+16R | 563.60 ns | 1.20 µs | 2.81 µs | SMR 80% faster than ArcSwap |
 
 ### Analysis
 
 - **Excellent Read Performance**: Sub-nanosecond latency (~0.9 ns) for both single and multi-thread reads, ~10x faster than ArcSwap
 - **Linear Scaling**: Multi-thread read performance remains nearly constant regardless of thread count
-- **Stable Mixed Workload**: Maintains ~88 ns latency under 1 writer + N readers scenarios
-- **Optimal for Read-Heavy Workloads**: At 100:1 and 10:1 R/W ratios, SMR-Swap dominates, 72-86% faster than ArcSwap, 90-98% faster than Mutex
-- **Write-Heavy Workloads**: At higher write ratios (1:10, 1:100), Mutex has better write efficiency, but SMR-Swap still 69-70% faster than ArcSwap
-- **Excellent Multi-Writer Performance**: Even with Mutex wrapping, SMR-Swap is 72-81% faster than ArcSwap in multi-writer multi-reader scenarios
+- **Stable Mixed Workload**: Maintains ~57 ns latency under 1 writer + N readers scenarios
+- **Optimal for Read-Heavy Workloads**: At 100:1 and 10:1 R/W ratios, SMR-Swap dominates, 91-97% faster than Mutex
+- **Write-Heavy Workloads**: At higher write ratios (1:10, 1:100), Mutex has better write efficiency
+- **Excellent Multi-Writer Performance**: Even with Mutex wrapping, SMR-Swap is 70-80% faster than ArcSwap in multi-writer multi-reader scenarios
 - **Good Under Memory Pressure**: Aggressive GC ensures stable performance under memory pressure
 
 ## Design
