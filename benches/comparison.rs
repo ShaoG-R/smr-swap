@@ -530,6 +530,145 @@ fn bench_read_under_memory_pressure(c: &mut Criterion) {
     group.finish();
 }
 
+// ============================================================================
+// 基准测试 9: 单写入者不同读写比例 (1 Writer + 2 Readers)
+// 测试读写比例: 100:1, 10:1, 1:1, 1:10, 1:100
+// ============================================================================
+fn bench_swmr_read_write_ratio(c: &mut Criterion) {
+    let mut group = c.benchmark_group("swmr_read_write_ratio");
+    group.sample_size(30);
+
+    const NUM_READERS: usize = 2;
+
+    // (read_multiplier, write_multiplier) 对应读写比例
+    // 例如 (100, 1) 表示读:写 = 100:1
+    let ratios: &[(usize, usize, &str)] = &[
+        (100, 1, "100:1"),
+        (10, 1, "10:1"),
+        (1, 1, "1:1"),
+        (1, 10, "1:10"),
+        (1, 100, "1:100"),
+    ];
+
+    for &(read_mult, write_mult, ratio_name) in ratios {
+        // SMR-Swap
+        group.bench_with_input(
+            BenchmarkId::new("smr_swap", ratio_name),
+            &(read_mult, write_mult),
+            |b, &(read_mult, write_mult)| {
+                b.iter_custom(|iters| {
+                    let mut swap = SmrSwap::new(vec![1u32; 1000]);
+
+                    let mut readers = Vec::with_capacity(NUM_READERS);
+                    for _ in 0..NUM_READERS {
+                        readers.push(swap.local());
+                    }
+
+                    let read_iters = iters * read_mult as u64;
+                    let write_iters = iters * write_mult as u64;
+
+                    let start = std::time::Instant::now();
+                    thread::scope(|s| {
+                        // 写入者线程
+                        s.spawn(|| {
+                            for i in 0..write_iters {
+                                swap.store(vec![i as u32; 1000]);
+                            }
+                        });
+
+                        // 读取者线程
+                        for reader in readers {
+                            s.spawn(move || {
+                                for _ in 0..read_iters {
+                                    let guard = reader.load();
+                                    black_box(&*guard);
+                                }
+                            });
+                        }
+                    });
+                    start.elapsed()
+                });
+            },
+        );
+
+        // ArcSwap
+        group.bench_with_input(
+            BenchmarkId::new("arc_swap", ratio_name),
+            &(read_mult, write_mult),
+            |b, &(read_mult, write_mult)| {
+                b.iter_custom(|iters| {
+                    let arc_swap = Arc::new(ArcSwap::new(Arc::new(vec![1u32; 1000])));
+
+                    let read_iters = iters * read_mult as u64;
+                    let write_iters = iters * write_mult as u64;
+
+                    let start = std::time::Instant::now();
+                    thread::scope(|s| {
+                        // 写入者线程
+                        let arc_swap_clone = arc_swap.clone();
+                        s.spawn(move || {
+                            for i in 0..write_iters {
+                                arc_swap_clone.store(Arc::new(vec![i as u32; 1000]));
+                            }
+                        });
+
+                        // 读取者线程
+                        for _ in 0..NUM_READERS {
+                            let arc_swap_clone = arc_swap.clone();
+                            s.spawn(move || {
+                                for _ in 0..read_iters {
+                                    let guard = arc_swap_clone.load();
+                                    black_box(&*guard);
+                                }
+                            });
+                        }
+                    });
+                    start.elapsed()
+                });
+            },
+        );
+
+        // Mutex
+        group.bench_with_input(
+            BenchmarkId::new("mutex", ratio_name),
+            &(read_mult, write_mult),
+            |b, &(read_mult, write_mult)| {
+                b.iter_custom(|iters| {
+                    let mutex = Arc::new(Mutex::new(vec![1u32; 1000]));
+
+                    let read_iters = iters * read_mult as u64;
+                    let write_iters = iters * write_mult as u64;
+
+                    let start = std::time::Instant::now();
+                    thread::scope(|s| {
+                        // 写入者线程
+                        let mutex_clone = mutex.clone();
+                        s.spawn(move || {
+                            for i in 0..write_iters {
+                                *mutex_clone.lock().unwrap() = vec![i as u32; 1000];
+                            }
+                        });
+
+                        // 读取者线程
+                        for _ in 0..NUM_READERS {
+                            let mutex_clone = mutex.clone();
+                            s.spawn(move || {
+                                for _ in 0..read_iters {
+                                    let guard = mutex_clone.lock().unwrap();
+                                    black_box(&*guard);
+                                }
+                            });
+                        }
+                    });
+                    start.elapsed()
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_single_thread_read,
@@ -540,6 +679,7 @@ criterion_group!(
     bench_multi_writer_multi_reader,
     bench_read_latency_with_held_guard,
     bench_read_under_memory_pressure,
+    bench_swmr_read_write_ratio,
 );
 
 criterion_main!(benches);
