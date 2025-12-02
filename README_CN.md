@@ -150,6 +150,7 @@ SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
 | `get() -> &T` | 获取当前值的引用（仅写者，无需 pin） |
 | `update(f: FnOnce(&T) -> T)` | 使用闭包更新值 |
 | `load() -> ReadGuard<T>` | 使用内部句柄读取当前值 |
+| `load_cloned() -> T` | 加载并克隆当前值（需要 `T: Clone`） |
 | `swap(new_value: T) -> T` | 交换值并返回旧值（需要 `T: Clone`） |
 | `update_and_fetch(f) -> ReadGuard<T>` | 应用闭包更新值并返回新值的守卫 |
 | `fetch_and_update(f) -> ReadGuard<T>` | 应用闭包更新值并返回旧值的守卫 |
@@ -165,6 +166,7 @@ SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
 | 方法 | 描述 |
 |------|------|
 | `load() -> ReadGuard<T>` | 读取当前值，返回 RAII 守卫 |
+| `load_cloned() -> T` | 加载并克隆当前值（需要 `T: Clone`） |
 | `map<F, U>(f: F) -> U` | 对值应用函数并返回结果 |
 | `filter<F>(f: F) -> Option<ReadGuard<T>>` | 条件性返回守卫 |
 | `is_pinned() -> bool` | 检查此读者是否当前被 pin |
@@ -178,6 +180,8 @@ RAII 守卫，实现 `Deref<Target = T>` 和 `AsRef<T>`，在守卫存活期间�
 | 方法 | 描述 |
 |------|------|
 | `version() -> usize` | 获取此守卫被 pin 到的版本 |
+| `cloned() -> T` | 克隆内部值并返回（需要 `T: Clone`） |
+| `into_inner() -> T` | 消耗守卫并返回克隆的值（需要 `T: Clone`） |
 | `clone()` | 克隆守卫（增加 pin 计数） |
 
 ### 标准 Trait 实现

@@ -150,6 +150,7 @@ Main entry point, holds data and write capability.
 | `get() -> &T` | Get reference to current value (writer-only, no pin required) |
 | `update(f: FnOnce(&T) -> T)` | Update value using a closure |
 | `load() -> ReadGuard<T>` | Read current value using internal handle |
+| `load_cloned() -> T` | Load and clone the current value (requires `T: Clone`) |
 | `swap(new_value: T) -> T` | Swap value and return old value (requires `T: Clone`) |
 | `update_and_fetch(f) -> ReadGuard<T>` | Apply closure to update and return guard to new value |
 | `fetch_and_update(f) -> ReadGuard<T>` | Apply closure to update and return guard to old value |
@@ -165,6 +166,7 @@ Thread-local read handle.
 | Method | Description |
 |--------|-------------|
 | `load() -> ReadGuard<T>` | Read current value, returns RAII guard |
+| `load_cloned() -> T` | Load and clone the current value (requires `T: Clone`) |
 | `map<F, U>(f: F) -> U` | Apply function to value and return result |
 | `filter<F>(f: F) -> Option<ReadGuard<T>>` | Conditionally return a guard |
 | `is_pinned() -> bool` | Check if this reader is currently pinned |
@@ -178,6 +180,8 @@ RAII guard, implements `Deref<Target = T>` and `AsRef<T>`, protects data from re
 | Method | Description |
 |--------|-------------|
 | `version() -> usize` | Get the version this guard is pinned to |
+| `cloned() -> T` | Clone the inner value and return it (requires `T: Clone`) |
+| `into_inner() -> T` | Consume the guard and return cloned value (requires `T: Clone`) |
 | `clone()` | Clone the guard (increments pin count) |
 
 ### Standard Trait Implementations

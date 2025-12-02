@@ -220,6 +220,34 @@ impl<T: 'static> SmrSwap<T> {
         self.local.load()
     }
 
+    /// Load the current value and clone it.
+    ///
+    /// This is a convenience method equivalent to `self.load().cloned()`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use smr_swap::SmrSwap;
+    ///
+    /// let swap = SmrSwap::new(String::from("hello"));
+    ///
+    /// // Instead of: (*swap.load()).clone()
+    /// // Or: swap.load().cloned()
+    /// let value: String = swap.load_cloned();
+    /// assert_eq!(value, "hello");
+    /// ```
+    ///
+    /// 加载当前值并克隆它。
+    ///
+    /// 这是一个便捷方法，等同于 `self.load().cloned()`。
+    #[inline]
+    pub fn load_cloned(&self) -> T
+    where
+        T: Clone,
+    {
+        self.load().cloned()
+    }
+
     /// Atomically swap the current value with a new one.
     ///
     /// Returns the old value.
@@ -352,6 +380,35 @@ impl<T: 'static> LocalReader<T> {
             None
         }
     }
+
+    /// Load the current value and clone it.
+    ///
+    /// This is a convenience method equivalent to `self.load().cloned()`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use smr_swap::SmrSwap;
+    ///
+    /// let swap = SmrSwap::new(String::from("hello"));
+    /// let local = swap.local();
+    ///
+    /// // Instead of: (*local.load()).clone()
+    /// // Or: local.load().cloned()
+    /// let value: String = local.load_cloned();
+    /// assert_eq!(value, "hello");
+    /// ```
+    ///
+    /// 加载当前值并克隆它。
+    ///
+    /// 这是一个便捷方法，等同于 `self.load().cloned()`。
+    #[inline]
+    pub fn load_cloned(&self) -> T
+    where
+        T: Clone,
+    {
+        self.load().cloned()
+    }
 }
 
 impl<T: 'static> Clone for LocalReader<T> {
@@ -384,6 +441,46 @@ impl<T: 'static> ReadGuard<'_, T> {
     #[inline]
     pub fn version(&self) -> usize {
         self.inner.version()
+    }
+
+    /// Clone the inner value and return it.
+    ///
+    /// This is useful when you need to return the value instead of the guard.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use smr_swap::SmrSwap;
+    ///
+    /// let swap = SmrSwap::new(42);
+    /// let value: i32 = swap.load().cloned();
+    /// assert_eq!(value, 42);
+    /// ```
+    ///
+    /// 克隆内部值并返回。
+    ///
+    /// 当你需要返回值而不是守卫时很有用。
+    #[inline]
+    pub fn cloned(&self) -> T
+    where
+        T: Clone,
+    {
+        self.deref().clone()
+    }
+
+    /// Convert the guard into the inner value by cloning.
+    ///
+    /// This consumes the guard and returns a clone of the inner value.
+    ///
+    /// 通过克隆将守卫转换为内部值。
+    ///
+    /// 这会消耗守卫并返回内部值的克隆。
+    #[inline]
+    pub fn into_inner(self) -> T
+    where
+        T: Clone,
+    {
+        self.deref().clone()
     }
 }
 
