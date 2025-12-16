@@ -114,6 +114,32 @@ fn main() {
 }
 ```
 
+### Shared Reader Creation with `SmrReader`
+
+If you need to distribute the ability to create readers to multiple threads (e.g., in a dynamic thread pool), use `SmrReader`. Unlike `LocalReader`, `SmrReader` is `Sync` and `Clone`.
+
+```rust
+use smr_swap::SmrSwap;
+use std::thread;
+
+let mut swap = SmrSwap::new(0);
+
+// Create a shareable SmrReader factory
+let reader_factory = swap.reader();
+
+for i in 0..3 {
+    // Clone the factory for each thread
+    let factory = reader_factory.clone();
+    
+    thread::spawn(move || {
+        // Use factory to create a LocalReader on the thread
+        let local = factory.local();
+        
+        // ... use local reader ...
+    });
+}
+```
+
 ## Core Concepts
 
 ### Type Hierarchy
@@ -122,6 +148,7 @@ fn main() {
 |------|------|-------------|
 | `SmrSwap<T>` | Main container, holds data and write capability | `new()`, `store()`, `get()`, `load()`, `local()`, `swap()` |
 | `LocalReader<T>` | Thread-local read handle | `load()`, `map()`, `filter()`, `is_pinned()`, `version()` |
+| `SmrReader<T>` | Cross-thread reader factory | `local()` |
 | `ReadGuard<'a, T>` | RAII guard, protects data during read | `Deref`, `AsRef`, `version()` |
 
 ```
@@ -146,6 +173,7 @@ Main entry point, holds data and write capability.
 |--------|-------------|
 | `new(initial: T)` | Create a new container |
 | `local() -> LocalReader<T>` | Create a thread-local read handle |
+| `reader() -> SmrReader<T>` | Create a shareable reader factory |
 | `store(new_value: T)` | Store a new value, old value will be safely reclaimed |
 | `get() -> &T` | Get reference to current value (writer-only, no pin required) |
 | `update(f: FnOnce(&T) -> T)` | Update value using a closure |
@@ -173,6 +201,15 @@ Thread-local read handle.
 | `version() -> usize` | Get current global version |
 | `clone()` | Create a new `LocalReader` |
 
+### `SmrReader<T>`
+
+A sharable factory for `LocalReader`.
+
+| Method | Description |
+|--------|-------------|
+| `local() -> LocalReader<T>` | Create a `LocalReader` for the current thread |
+| `clone()` | Clone the factory (`Sync` + `Clone`) |
+
 ### `ReadGuard<'a, T>`
 
 RAII guard, implements `Deref<Target = T>` and `AsRef<T>`, protects data from reclamation while guard is alive.
@@ -190,6 +227,7 @@ RAII guard, implements `Deref<Target = T>` and `AsRef<T>`, protects data from re
 |------|--------|
 | `SmrSwap<T>` | `Default` (requires `T: Default`), `From<T>`, `Debug` (requires `T: Debug`) |
 | `LocalReader<T>` | `Clone`, `Send`, `Debug` |
+| `SmrReader<T>` | `Clone`, `Sync`, `Send`, `Debug` |
 | `ReadGuard<'a, T>` | `Deref`, `AsRef`, `Clone`, `Debug` (requires `T: Debug`) |
 
 ## Performance

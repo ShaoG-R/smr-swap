@@ -114,6 +114,32 @@ fn main() {
 }
 ```
 
+### 使用 `SmrReader` 共享读取者创建能力
+
+如果需要将创建读取者的能力分发给多个线程（例如，在线程动态变化的线程池中），可以使用 `SmrReader`。与 `LocalReader` 不同，`SmrReader` 是 `Sync` 和 `Clone` 的。
+
+```rust
+use smr_swap::SmrSwap;
+use std::thread;
+
+let mut swap = SmrSwap::new(0);
+
+// 创建一个可以共享的 SmrReader 工厂
+let reader_factory = swap.reader();
+
+for i in 0..3 {
+    // 为每个线程克隆工厂
+    let factory = reader_factory.clone();
+    
+    thread::spawn(move || {
+        // 使用工厂在线程上创建 LocalReader
+        let local = factory.local();
+        
+        // ... 使用 local reader ...
+    });
+}
+```
+
 ## 核心概念
 
 ### 类型层次
@@ -122,6 +148,7 @@ fn main() {
 |------|------|--------|
 | `SmrSwap<T>` | 主容器，持有数据和写入能力 | `new()`, `store()`, `get()`, `load()`, `local()`, `swap()` |
 | `LocalReader<T>` | 线程本地读取句柄 | `load()`, `map()`, `filter()`, `is_pinned()`, `version()` |
+| `SmrReader<T>` | 线程间共享的读取者工厂 | `local()` |
 | `ReadGuard<'a, T>` | RAII 守卫，保护读取期间的数据 | `Deref`, `AsRef`, `version()` |
 
 ```
@@ -146,6 +173,7 @@ SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
 |------|------|
 | `new(initial: T)` | 创建新容器 |
 | `local() -> LocalReader<T>` | 创建线程本地的读取句柄 |
+| `reader() -> SmrReader<T>` | 创建可共享的读取者工厂 |
 | `store(new_value: T)` | 存储新值，旧值会被安全回收 |
 | `get() -> &T` | 获取当前值的引用（仅写者，无需 pin） |
 | `update(f: FnOnce(&T) -> T)` | 使用闭包更新值 |
@@ -173,6 +201,15 @@ SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
 | `version() -> usize` | 获取当前全局版本 |
 | `clone()` | 创建新的 `LocalReader` |
 
+### `SmrReader<T>`
+
+可以跨线程共享的 `LocalReader` 工厂。
+
+| 方法 | 描述 |
+|------|------|
+| `local() -> LocalReader<T>` | 为当前线程创建 `LocalReader` |
+| `clone()` | 克隆工厂（`Sync` + `Clone`） |
+
 ### `ReadGuard<'a, T>`
 
 RAII 守卫，实现 `Deref<Target = T>` 和 `AsRef<T>`，在守卫存活期间保护数据不被回收。
@@ -190,6 +227,7 @@ RAII 守卫，实现 `Deref<Target = T>` 和 `AsRef<T>`，在守卫存活期间�
 |------|-------|
 | `SmrSwap<T>` | `Default` (要求 `T: Default`), `From<T>`, `Debug` (要求 `T: Debug`) |
 | `LocalReader<T>` | `Clone`, `Send`, `Debug` |
+| `SmrReader<T>` | `Clone`, `Sync`, `Send`, `Debug` |
 | `ReadGuard<'a, T>` | `Deref`, `AsRef`, `Clone`, `Debug` (要求 `T: Debug`) |
 
 ## 性能对比

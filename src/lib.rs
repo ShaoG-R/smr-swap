@@ -32,7 +32,7 @@ use std::ops::Deref;
 use swmr_cell::SwmrCell;
 
 // Re-export for backward compatibility
-pub use swmr_cell::{LocalReader as CellLocalReader, PinGuard};
+pub use swmr_cell::{LocalReader as CellLocalReader, PinGuard, SwmrReader as CellSwmrReader};
 
 /// Main entry point for the SMR swap library.
 ///
@@ -44,6 +44,46 @@ pub use swmr_cell::{LocalReader as CellLocalReader, PinGuard};
 pub struct SmrSwap<T: 'static> {
     cell: SwmrCell<T>,
     local: LocalReader<T>,
+}
+
+/// A handle for creating `LocalReader`s that can be shared across threads.
+///
+/// Unlike `LocalReader`, which is `!Sync` and bound to a single thread,
+/// `SwmrReader` is `Sync` and `Clone`. It acts as a factory for `LocalReader`s.
+///
+/// 可以跨线程共享的用于创建 `LocalReader` 的句柄。
+///
+/// 与 `!Sync` 且绑定到单个线程的 `LocalReader` 不同，
+/// `SwmrReader` 是 `Sync` 和 `Clone` 的。它充当 `LocalReader` 的工厂。
+pub struct SwmrReader<T: 'static> {
+    inner: CellSwmrReader<T>,
+}
+
+impl<T: 'static> SwmrReader<T> {
+    /// Create a new `LocalReader` for the current thread.
+    ///
+    /// 为当前线程创建一个新的 `LocalReader`。
+    #[inline]
+    pub fn local(&self) -> LocalReader<T> {
+        LocalReader {
+            inner: self.inner.local(),
+        }
+    }
+}
+
+impl<T: 'static> Clone for SwmrReader<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T: 'static> fmt::Debug for SwmrReader<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SwmrReader").finish()
+    }
 }
 
 /// Thread-local reader handle, not Sync.
@@ -98,7 +138,9 @@ impl<T: 'static> SmrSwap<T> {
     /// 使用给定的初始值创建新的 SMR 容器。
     #[inline]
     pub fn new(initial: T) -> Self {
-        let cell = SwmrCell::builder().auto_reclaim_threshold(Some(4)).build(initial);
+        let cell = SwmrCell::builder()
+            .auto_reclaim_threshold(Some(4))
+            .build(initial);
         let local = LocalReader {
             inner: cell.local(),
         };
@@ -118,6 +160,22 @@ impl<T: 'static> SmrSwap<T> {
     pub fn local(&self) -> LocalReader<T> {
         LocalReader {
             inner: self.cell.local(),
+        }
+    }
+
+    /// Create a new `SwmrReader` that can be shared across threads.
+    ///
+    /// `SwmrReader` is `Sync` + `Clone` and acts as a factory for `LocalReader`s.
+    /// This is useful for distributing reader creation capability to other threads.
+    ///
+    /// 创建一个新的 `SwmrReader`，可以在线程之间共享。
+    ///
+    /// `SwmrReader` 是 `Sync` + `Clone` 的，充当 `LocalReader` 的工厂。
+    /// 这对于将读者创建能力分发给其他线程很有用。
+    #[inline]
+    pub fn reader(&self) -> SwmrReader<T> {
+        SwmrReader {
+            inner: self.cell.reader(),
         }
     }
 
