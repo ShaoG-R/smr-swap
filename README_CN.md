@@ -200,6 +200,8 @@ SmrSwap  ──local()──►  LocalReader  ──load()──►  ReadGuard
 | `is_pinned() -> bool` | 检查此读者是否当前被 pin |
 | `version() -> usize` | 获取当前全局版本 |
 | `clone()` | 创建新的 `LocalReader` |
+| `share() -> SmrReader<T>` | 创建可共享的读取者工厂 |
+| `into_swmr() -> SmrReader<T>` | 转换为可共享的读取者工厂 |
 
 ### `SmrReader<T>`
 

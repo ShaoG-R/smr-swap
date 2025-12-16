@@ -200,6 +200,8 @@ Thread-local read handle.
 | `is_pinned() -> bool` | Check if this reader is currently pinned |
 | `version() -> usize` | Get current global version |
 | `clone()` | Create a new `LocalReader` |
+| `share() -> SmrReader<T>` | Create a shareable reader factory |
+| `into_swmr() -> SmrReader<T>` | Convert to a shareable reader factory |
 
 ### `SmrReader<T>`
 

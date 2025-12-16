@@ -467,6 +467,36 @@ impl<T: 'static> LocalReader<T> {
     {
         self.load().cloned()
     }
+
+    /// Create a new `SmrReader` from this `LocalReader`.
+    ///
+    /// `SmrReader` is `Sync` + `Clone` and acts as a factory for `LocalReader`s.
+    /// This is equivalent to calling `swap.reader()`, but using the `LocalReader`'s reference to the shared state.
+    ///
+    /// 从此 `LocalReader` 创建一个新的 `SmrReader`。
+    /// `SmrReader` 是 `Sync` + `Clone` 的，充当 `LocalReader` 的工厂。
+    /// 这相当于调用 `swap.reader()`，但使用 `LocalReader` 对共享状态的引用。
+    #[inline]
+    pub fn share(&self) -> SmrReader<T> {
+        SmrReader {
+            inner: self.inner.share(),
+        }
+    }
+
+    /// Convert this `LocalReader` into a `SmrReader`.
+    ///
+    /// This consumes the `LocalReader` and returns a `SmrReader`
+    /// that can be sent to another thread to create new `LocalReader`s.
+    ///
+    /// 将此 `LocalReader` 转换为 `SmrReader`。
+    /// 这会消耗 `LocalReader` 并返回一个 `SmrReader`，
+    /// 该 `SmrReader` 可以发送到另一个线程以创建新 `LocalReader`。
+    #[inline]
+    pub fn into_swmr(self) -> SmrReader<T> {
+        SmrReader {
+            inner: self.inner.into_swmr(),
+        }
+    }
 }
 
 impl<T: 'static> Clone for LocalReader<T> {
