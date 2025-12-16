@@ -115,6 +115,112 @@ mod mutex_ops {
 }
 
 // ============================================================================
+// 基准测试 0: Handle 操作性能 (Clone 等)
+// ============================================================================
+fn bench_handle_ops(c: &mut Criterion) {
+    let mut group = c.benchmark_group("handle_ops");
+
+    // 1. Clone 性能
+    group.bench_function("smr_swap_local_clone", |b| {
+        let swap = smr_ops::new(DATA_SIZE);
+        let local = swap.local();
+        b.iter(|| {
+            let _ = black_box(local.clone());
+        });
+    });
+
+    group.bench_function("arc_swap_clone", |b| {
+        let arc_swap = arc_ops::new(DATA_SIZE);
+        b.iter(|| {
+            let _ = black_box(arc_swap.clone());
+        });
+    });
+
+    group.bench_function("mutex_clone", |b| {
+        let mutex = mutex_ops::new(DATA_SIZE);
+        b.iter(|| {
+            let _ = black_box(mutex.clone());
+        });
+    });
+
+    // 2. SmrSwap Local 特有操作
+    group.bench_function("smr_swap_is_pinned", |b| {
+        let swap = smr_ops::new(DATA_SIZE);
+        let local = swap.local();
+        b.iter(|| {
+            let _ = black_box(local.is_pinned());
+        });
+    });
+
+    group.bench_function("smr_swap_version", |b| {
+        let swap = smr_ops::new(DATA_SIZE);
+        let local = swap.local();
+        b.iter(|| {
+            let _ = black_box(local.version());
+        });
+    });
+
+    group.finish();
+}
+
+// ============================================================================
+// 基准测试 0.1: 结构体创建性能
+// ============================================================================
+fn bench_creation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("creation");
+
+    group.bench_function("smr_swap", |b| {
+        b.iter(|| {
+            let _ = black_box(smr_ops::new(DATA_SIZE));
+        });
+    });
+
+    group.bench_function("arc_swap", |b| {
+        b.iter(|| {
+            let _ = black_box(arc_ops::new(DATA_SIZE));
+        });
+    });
+
+    group.bench_function("mutex", |b| {
+        b.iter(|| {
+            let _ = black_box(mutex_ops::new(DATA_SIZE));
+        });
+    });
+
+    group.finish();
+}
+
+// ============================================================================
+// 基准测试 0.2: Drop 性能
+// ============================================================================
+fn bench_drop(c: &mut Criterion) {
+    let mut group = c.benchmark_group("drop");
+
+    group.bench_function("smr_swap", |b| {
+        b.iter_with_setup(
+            || smr_ops::new(DATA_SIZE),
+            |swap| std::mem::drop(black_box(swap)),
+        );
+    });
+
+    group.bench_function("arc_swap", |b| {
+        b.iter_with_setup(
+            || arc_ops::new(DATA_SIZE),
+            |swap| std::mem::drop(black_box(swap)),
+        );
+    });
+
+    group.bench_function("mutex", |b| {
+        b.iter_with_setup(
+            || mutex_ops::new(DATA_SIZE),
+            |mutex| std::mem::drop(black_box(mutex)),
+        );
+    });
+
+    group.finish();
+}
+
+// ============================================================================
 // 基准测试 1: 单线程读取性能
 // ============================================================================
 fn bench_single_thread_read(c: &mut Criterion) {
@@ -318,7 +424,9 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
                             let swap = swap.clone();
                             s.spawn(move || {
                                 for i in 0..iters {
-                                    swap.lock().unwrap().store(create_indexed_data(i, DATA_SIZE));
+                                    swap.lock()
+                                        .unwrap()
+                                        .store(create_indexed_data(i, DATA_SIZE));
                                 }
                             });
                         }
@@ -693,6 +801,9 @@ fn bench_swmr_read_write_ratio(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    bench_handle_ops,
+    bench_creation,
+    bench_drop,
     bench_single_thread_read,
     bench_single_thread_write,
     bench_multi_thread_read,

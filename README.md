@@ -268,6 +268,15 @@ Benchmark results comparing SMR-Swap against `arc-swap` (Windows, Bench mode, In
 | 4W+8R | 564.80 ns | 825.97 ns | 2.17 µs | SMR 74% faster than ArcSwap |
 | 4W+16R | 563.60 ns | 1.20 µs | 2.81 µs | SMR 80% faster than ArcSwap |
 
+### Operational Overhead
+
+| Operation | SMR-Swap | ArcSwap | Mutex | Notes |
+|-----------|----------|---------|-------|-------|
+| Creation | ~214 ns | ~130 ns | ~50 ns | Higher setup cost for SMR |
+| Drop | ~65 ns | ~110 ns | ~42 ns | SMR drop is faster than ArcSwap |
+| Handle Clone | ~56 ns | ~9 ns | ~9 ns | LocalReader clone is heavier than Arc clone |
+| Local Check | ~0.2 ns | N/A | N/A | `is_pinned`/`version` are extremely cheap |
+
 ### Analysis
 
 - **Excellent Read Performance**: Sub-nanosecond latency (~0.9 ns) for both single and multi-thread reads, ~10x faster than ArcSwap
@@ -277,6 +286,7 @@ Benchmark results comparing SMR-Swap against `arc-swap` (Windows, Bench mode, In
 - **Write-Heavy Workloads**: At higher write ratios (1:10, 1:100), Mutex has better write efficiency
 - **Excellent Multi-Writer Performance**: Even with Mutex wrapping, SMR-Swap is 70-80% faster than ArcSwap in multi-writer multi-reader scenarios
 - **Good Under Memory Pressure**: Aggressive GC ensures stable performance under memory pressure
+- **Operational Overhead**: Higher creation/cloning cost (vs simple Arc), but faster destruction and negligible local status checks
 
 ## Design
 
