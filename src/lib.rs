@@ -49,17 +49,17 @@ pub struct SmrSwap<T: 'static> {
 /// A handle for creating `LocalReader`s that can be shared across threads.
 ///
 /// Unlike `LocalReader`, which is `!Sync` and bound to a single thread,
-/// `SwmrReader` is `Sync` and `Clone`. It acts as a factory for `LocalReader`s.
+/// `SmrReader` is `Sync` and `Clone`. It acts as a factory for `LocalReader`s.
 ///
 /// 可以跨线程共享的用于创建 `LocalReader` 的句柄。
 ///
 /// 与 `!Sync` 且绑定到单个线程的 `LocalReader` 不同，
-/// `SwmrReader` 是 `Sync` 和 `Clone` 的。它充当 `LocalReader` 的工厂。
-pub struct SwmrReader<T: 'static> {
+/// `SmrReader` 是 `Sync` 和 `Clone` 的。它充当 `LocalReader` 的工厂。
+pub struct SmrReader<T: 'static> {
     inner: CellSwmrReader<T>,
 }
 
-impl<T: 'static> SwmrReader<T> {
+impl<T: 'static> SmrReader<T> {
     /// Create a new `LocalReader` for the current thread.
     ///
     /// 为当前线程创建一个新的 `LocalReader`。
@@ -71,7 +71,7 @@ impl<T: 'static> SwmrReader<T> {
     }
 }
 
-impl<T: 'static> Clone for SwmrReader<T> {
+impl<T: 'static> Clone for SmrReader<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -80,9 +80,9 @@ impl<T: 'static> Clone for SwmrReader<T> {
     }
 }
 
-impl<T: 'static> fmt::Debug for SwmrReader<T> {
+impl<T: 'static> fmt::Debug for SmrReader<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SwmrReader").finish()
+        f.debug_struct("SmrReader").finish()
     }
 }
 
@@ -163,18 +163,18 @@ impl<T: 'static> SmrSwap<T> {
         }
     }
 
-    /// Create a new `SwmrReader` that can be shared across threads.
+    /// Create a new `SmrReader` that can be shared across threads.
     ///
-    /// `SwmrReader` is `Sync` + `Clone` and acts as a factory for `LocalReader`s.
+    /// `SmrReader` is `Sync` + `Clone` and acts as a factory for `LocalReader`s.
     /// This is useful for distributing reader creation capability to other threads.
     ///
-    /// 创建一个新的 `SwmrReader`，可以在线程之间共享。
+    /// 创建一个新的 `SmrReader`，可以在线程之间共享。
     ///
-    /// `SwmrReader` 是 `Sync` + `Clone` 的，充当 `LocalReader` 的工厂。
+    /// `SmrReader` 是 `Sync` + `Clone` 的，充当 `LocalReader` 的工厂。
     /// 这对于将读者创建能力分发给其他线程很有用。
     #[inline]
-    pub fn reader(&self) -> SwmrReader<T> {
-        SwmrReader {
+    pub fn reader(&self) -> SmrReader<T> {
+        SmrReader {
             inner: self.cell.reader(),
         }
     }
