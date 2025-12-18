@@ -1,6 +1,6 @@
 [package]
 name = "smr-swap"
-version = "0.8.5"
+version = "0.8.6"
 edition = "2024"
 authors = ["ShaoG <shaog.rs@gmail.com>"]
 description = "A minimal-locking, high-performance Single-Writer Multiple-Reader swap container using epoch-based memory reclamation"
@@ -17,11 +17,14 @@ criterion = { version = "0.7.0", features = ["html_reports"] }
 tokio = { version = "1.48", features = ["full"] }
 
 [features]
+default = ["std"]
+std = ["swmr-cell/std"]
+spin = ["swmr-cell/spin"]
 loom = ["dep:loom", "swmr-cell/loom"]
 
 [dependencies]
 loom = { version = "0.7", optional = true }
-swmr-cell = "0.1.7"
+swmr-cell = { version = "0.1.9", default-features = false }
 
 [[bench]]
 name = "comparison"

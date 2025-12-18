@@ -2,7 +2,9 @@
 //!
 //! Tests core operations: creation, reading, updating, and basic reader operations
 
+extern crate std;
 use crate::{LocalReader, SmrSwap};
+use std::prelude::v1::*;
 
 /// Test basic creation and reading with integers
 /// 测试基本的创建和读取（整数）
@@ -26,9 +28,9 @@ fn test_basic_new_and_read_string() {
 /// 测试基本的创建和读取（向量）
 #[test]
 fn test_basic_new_and_read_vector() {
-    let swap = SmrSwap::new(vec![1, 2, 3, 4, 5]);
+    let swap = SmrSwap::new(std::vec![1, 2, 3, 4, 5]);
     let guard = swap.load();
-    assert_eq!(*guard, vec![1, 2, 3, 4, 5]);
+    assert_eq!(*guard, std::vec![1, 2, 3, 4, 5]);
 }
 
 /// Test basic store operation with integers
@@ -467,16 +469,16 @@ fn test_from() {
 #[test]
 fn test_debug() {
     let swap = SmrSwap::new(42);
-    let debug_str = format!("{:?}", swap);
+    let debug_str = std::format!("{:?}", swap);
     assert!(debug_str.contains("SmrSwap"));
     assert!(debug_str.contains("42"));
 
     let reader = swap.local();
-    let debug_str = format!("{:?}", reader);
+    let debug_str = std::format!("{:?}", reader);
     assert!(debug_str.contains("LocalReader"));
 
     let guard = reader.load();
-    let debug_str = format!("{:?}", guard);
+    let debug_str = std::format!("{:?}", guard);
     assert!(debug_str.contains("ReadGuard"));
     assert!(debug_str.contains("42"));
 }

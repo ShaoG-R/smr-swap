@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 //! A minimal locking, version-based concurrent swap library.
 //!
 //! This library provides a mechanism to swap values atomically while allowing concurrent readers
@@ -27,8 +29,8 @@
 //! handle.join().unwrap();
 //! ```
 
-use std::fmt;
-use std::ops::Deref;
+use core::fmt;
+use core::ops::Deref;
 use swmr_cell::SwmrCell;
 
 // Re-export for backward compatibility

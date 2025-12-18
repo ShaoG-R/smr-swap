@@ -3,6 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/smr-swap)](https://crates.io/crates/smr-swap)
 [![Documentation](https://docs.rs/smr-swap/badge.svg)](https://docs.rs/smr-swap)
 [![License](https://img.shields.io/crates/l/smr-swap)](LICENSE-MIT)
+![no_std compatible](https://img.shields.io/badge/no_std-compatible-success.svg)
 
 A high-performance Rust library for safely sharing mutable data between a single writer and multiple readers using version-based memory reclamation.
 
@@ -15,6 +16,7 @@ A high-performance Rust library for safely sharing mutable data between a single
 - **Simple API**: Only three core types: `SmrSwap`, `LocalReader`, `ReadGuard`
 - **Memory Safe**: Uses version-based reclamation (via `swmr-cell`) to prevent use-after-free
 - **Zero-Copy Reads**: Readers get direct references to the current value via RAII guards
+- **no_std Compatible**: Supports `no_std` environments (requires `alloc`)
 
 ## Quick Start
 
@@ -25,6 +27,15 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 smr-swap = "0.8"
+```
+
+### no_std Usage
+
+Use with `default-features = false` and enable `spin` feature (if you need the default spinlock-based mutex implementation in `swmr-cell`):
+
+```toml
+[dependencies]
+smr-swap = { version = "0.8", default-features = false, features = ["spin"] }
 ```
 
 ### Basic Usage

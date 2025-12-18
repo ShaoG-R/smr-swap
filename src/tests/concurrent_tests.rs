@@ -3,6 +3,9 @@
 //! Tests concurrent behavior with multiple readers and writers,
 //! stress tests, and race condition handling
 
+extern crate std;
+use std::prelude::v1::*;
+
 use crate::SmrSwap;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -246,7 +249,7 @@ fn test_rapid_reader_cloning() {
 /// 测试并发更新中的读取者一致性
 #[test]
 fn test_reader_consistency_concurrent_updates() {
-    let mut swap = SmrSwap::new(vec![0]);
+    let mut swap = SmrSwap::new(std::vec![0]);
     let num_updates = 100;
 
     // Create readers before moving swap to writer thread
@@ -255,7 +258,7 @@ fn test_reader_consistency_concurrent_updates() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=num_updates {
-                swap.store(vec![i]);
+                swap.store(std::vec![i]);
             }
         });
 
@@ -318,7 +321,7 @@ fn test_concurrent_string_values() {
     thread::scope(|s| {
         s.spawn(|| {
             for i in 1..=num_updates {
-                swap.store(format!("value_{}", i));
+                swap.store(std::format!("value_{}", i));
             }
         });
 

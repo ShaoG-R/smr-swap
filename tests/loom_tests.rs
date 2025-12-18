@@ -24,7 +24,7 @@ fn loom_basic_update_read() {
             assert!(*guard == 0 || *guard == 1);
         });
 
-        swap.update(1);
+        swap.update(|_| 1); // fix: update takes a closure, store takes a value
         t.join().unwrap();
     });
 }
@@ -46,9 +46,9 @@ fn loom_multiple_updates_reads() {
             }
         });
 
-        swap.update(1);
+        swap.store(1);
         thread::yield_now();
-        swap.update(2);
+        swap.store(2);
 
         t.join().unwrap();
     });
@@ -63,7 +63,7 @@ fn loom_smrswap_read() {
 
         assert_eq!(*swap.load(), 10);
 
-        swap.update(20);
+        swap.store(20);
 
         assert_eq!(*swap.load(), 20);
     });
@@ -82,7 +82,7 @@ fn loom_map() {
             assert!(res == 10 || res == 20);
         });
 
-        swap.update(10);
+        swap.store(10);
         t.join().unwrap();
     });
 }
@@ -102,6 +102,29 @@ fn loom_update_and_fetch() {
 
         let new_val = swap.update_and_fetch(|v| v + 1);
         assert_eq!(*new_val, 11);
+
+        t.join().unwrap();
+    });
+}
+
+/// Test: Fetch and update
+/// 测试：获取并更新
+#[test]
+fn loom_fetch_and_update() {
+    loom::model(|| {
+        let mut swap = SmrSwap::new(10);
+        let reader = swap.local();
+
+        let t = thread::spawn(move || {
+            let guard = reader.load();
+            assert!(*guard == 10 || *guard == 11);
+        });
+
+        {
+            let old_val = swap.fetch_and_update(|v| v + 1);
+            assert_eq!(*old_val, 10);
+        }
+        assert_eq!(*swap.load(), 11);
 
         t.join().unwrap();
     });
@@ -147,7 +170,7 @@ fn loom_filter() {
             }
         });
 
-        swap.update(20);
+        swap.store(20);
         t.join().unwrap();
     });
 }
@@ -172,7 +195,7 @@ fn loom_concurrent_readers() {
             }));
         }
 
-        swap.update(1);
+        swap.store(1);
 
         for h in handles {
             h.join().unwrap();
@@ -193,7 +216,7 @@ fn loom_guard_validity() {
         assert_eq!(*guard, 0);
 
         // Update should not invalidate existing guard
-        swap.update(1);
+        swap.store(1);
 
         // Old guard should still be valid
         assert_eq!(*guard, 0);
@@ -217,5 +240,64 @@ fn loom_read_guard_clone() {
 
         assert_eq!(*guard1, 42);
         assert_eq!(*guard2, 42);
+    });
+}
+
+/// Test: SmrReader creation and usage
+/// 测试：SmrReader 创建和使用
+#[test]
+fn loom_smr_reader() {
+    loom::model(|| {
+        let mut swap = SmrSwap::new(0);
+        let smr_reader = swap.reader();
+
+        let t = thread::spawn(move || {
+            let local = smr_reader.local();
+            let guard = local.load();
+            assert!(*guard == 0 || *guard == 1);
+        });
+
+        swap.store(1);
+        t.join().unwrap();
+    });
+}
+
+/// Test: LocalReader share (create SmrReader)
+/// 测试：LocalReader share (创建 SmrReader)
+#[test]
+fn loom_share_reader() {
+    loom::model(|| {
+        let mut swap = SmrSwap::new(0);
+        let local = swap.local();
+        let smr_reader = local.share();
+
+        let t = thread::spawn(move || {
+            let local2 = smr_reader.local();
+            let guard = local2.load();
+            assert!(*guard == 0 || *guard == 1);
+        });
+
+        swap.store(1);
+        t.join().unwrap();
+    });
+}
+
+/// Test: LocalReader into_swmr
+/// 测试：LocalReader into_swmr
+#[test]
+fn loom_into_swmr() {
+    loom::model(|| {
+        let mut swap = SmrSwap::new(0);
+        let local = swap.local();
+        let smr_reader = local.into_swmr();
+
+        let t = thread::spawn(move || {
+            let local2 = smr_reader.local();
+            let guard = local2.load();
+            assert!(*guard == 0 || *guard == 1);
+        });
+
+        swap.store(1);
+        t.join().unwrap();
     });
 }

@@ -2,7 +2,9 @@
 //!
 //! Tests for advanced operations: map, filter, update_and_fetch, swap, and reader operations
 
+extern crate std;
 use crate::SmrSwap;
+use std::prelude::v1::*;
 
 /// Test reader map operation with integers
 /// 测试读取者 map 操作（整数）
@@ -38,13 +40,13 @@ fn test_reader_map_string() {
 /// 测试读取者 map 操作（向量）
 #[test]
 fn test_reader_map_vector() {
-    let mut swap = SmrSwap::new(vec![1, 2, 3]);
+    let mut swap = SmrSwap::new(std::vec![1, 2, 3]);
     let reader = swap.local();
 
     let result = reader.map(|v| v.len());
     assert_eq!(result, 3);
 
-    swap.store(vec![1, 2, 3, 4, 5]);
+    swap.store(std::vec![1, 2, 3, 4, 5]);
     let result = reader.map(|v| v.iter().sum::<i32>());
     assert_eq!(result, 15);
 }
@@ -85,14 +87,14 @@ fn test_reader_filter_string() {
 /// 测试读取者 filter（向量）
 #[test]
 fn test_reader_filter_vector() {
-    let mut swap = SmrSwap::new(vec![1, 2, 3, 4, 5]);
+    let mut swap = SmrSwap::new(std::vec![1, 2, 3, 4, 5]);
     let reader = swap.local();
 
     let val = reader.filter(|v| v.len() > 3);
     assert!(val.is_some());
-    assert_eq!(*val.unwrap(), vec![1, 2, 3, 4, 5]);
+    assert_eq!(*val.unwrap(), std::vec![1, 2, 3, 4, 5]);
 
-    swap.store(vec![1, 2]);
+    swap.store(std::vec![1, 2]);
     let val = reader.filter(|v| v.len() > 3);
     assert!(val.is_none());
 }
@@ -128,7 +130,7 @@ fn test_writer_update_and_fetch_string() {
     }
     assert_eq!(*reader.load(), "HELLO");
 
-    let val2 = swap.update_and_fetch(|s| format!("{} world", s));
+    let val2 = swap.update_and_fetch(|s| std::format!("{} world", s));
     assert_eq!(*val2, "HELLO world");
     assert_eq!(*reader.load(), "HELLO world");
 }
@@ -137,7 +139,7 @@ fn test_writer_update_and_fetch_string() {
 /// 测试写入者 update_and_fetch（向量）
 #[test]
 fn test_writer_update_and_fetch_vector() {
-    let mut swap = SmrSwap::new(vec![1, 2, 3]);
+    let mut swap = SmrSwap::new(std::vec![1, 2, 3]);
     let reader = swap.local();
 
     let val = swap.update_and_fetch(|v| {
@@ -145,8 +147,8 @@ fn test_writer_update_and_fetch_vector() {
         new_v.push(4);
         new_v
     });
-    assert_eq!(&*val, &vec![1, 2, 3, 4]);
-    assert_eq!(&*reader.load(), &vec![1, 2, 3, 4]);
+    assert_eq!(&*val, &std::vec![1, 2, 3, 4]);
+    assert_eq!(&*reader.load(), &std::vec![1, 2, 3, 4]);
 }
 
 /// Test writer read capability
@@ -205,7 +207,7 @@ fn test_chained_operations() {
 /// 测试在同一 guard 上的多个操作
 #[test]
 fn test_multiple_operations_same_guard() {
-    let swap = SmrSwap::new(vec![1, 2, 3, 4, 5]);
+    let swap = SmrSwap::new(std::vec![1, 2, 3, 4, 5]);
     let reader = swap.local();
     let guard = reader.load();
 
@@ -221,13 +223,13 @@ fn test_multiple_operations_same_guard() {
 /// 测试 map 与复杂转换
 #[test]
 fn test_map_complex_transformation() {
-    let mut swap = SmrSwap::new(vec![1, 2, 3, 4, 5]);
+    let mut swap = SmrSwap::new(std::vec![1, 2, 3, 4, 5]);
     let reader = swap.local();
 
     let result = reader.map(|v| v.iter().filter(|x| *x % 2 == 0).map(|x| x * 2).sum::<i32>());
     assert_eq!(result, 12); // (2*2 + 4*2) = 12
 
-    swap.store(vec![10, 20, 30]);
+    swap.store(std::vec![10, 20, 30]);
     let result = reader.map(|v| v.iter().sum::<i32>());
     assert_eq!(result, 60);
 }
@@ -251,7 +253,7 @@ fn test_filter_complex_condition() {
 /// 测试 update_and_fetch 与副作用
 #[test]
 fn test_update_and_fetch_side_effects() {
-    let mut swap = SmrSwap::new(vec![1, 2, 3]);
+    let mut swap = SmrSwap::new(std::vec![1, 2, 3]);
     let reader = swap.local();
 
     let mut call_count = 0;
@@ -263,8 +265,8 @@ fn test_update_and_fetch_side_effects() {
     });
 
     assert_eq!(call_count, 1);
-    assert_eq!(&*val, &vec![1, 2, 3, 4]);
-    assert_eq!(&*reader.load(), &vec![1, 2, 3, 4]);
+    assert_eq!(&*val, &std::vec![1, 2, 3, 4]);
+    assert_eq!(&*reader.load(), &std::vec![1, 2, 3, 4]);
 }
 
 /// Test map returns None for empty option
@@ -327,12 +329,12 @@ fn test_swap_operation() {
 /// 测试 swap 与复杂类型
 #[test]
 fn test_swap_complex_types() {
-    let mut swap = SmrSwap::new(vec![1, 2, 3]);
+    let mut swap = SmrSwap::new(std::vec![1, 2, 3]);
     let reader = swap.local();
 
-    let old = swap.swap(vec![4, 5, 6]);
-    assert_eq!(old, vec![1, 2, 3]);
-    assert_eq!(*reader.load(), vec![4, 5, 6]);
+    let old = swap.swap(std::vec![4, 5, 6]);
+    assert_eq!(old, std::vec![1, 2, 3]);
+    assert_eq!(*reader.load(), std::vec![4, 5, 6]);
 }
 
 /// Test ReadGuard clone

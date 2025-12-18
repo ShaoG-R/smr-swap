@@ -3,6 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/smr-swap)](https://crates.io/crates/smr-swap)
 [![Documentation](https://docs.rs/smr-swap/badge.svg)](https://docs.rs/smr-swap)
 [![License](https://img.shields.io/crates/l/smr-swap)](LICENSE-MIT)
+![no_std compatible](https://img.shields.io/badge/no_std-compatible-success.svg)
 
 一个高性能的 Rust 库，使用基于版本的内存回收机制，安全地在单个写入者和多个读取者之间共享可变数据。
 
@@ -15,6 +16,7 @@
 - **简洁 API**: 仅三个核心类型 `SmrSwap`、`LocalReader`、`ReadGuard`
 - **内存安全**: 使用基于版本的回收机制（通过 `swmr-cell`）防止 Use-After-Free
 - **零拷贝读取**: 读取者通过 RAII 守卫直接获得当前值的引用
+- **no_std 兼容**: 支持 `no_std` 环境（需要 `alloc`）
 
 ## 快速开始
 
@@ -25,6 +27,15 @@
 ```toml
 [dependencies]
 smr-swap = "0.8"
+```
+
+### no_std 用法
+
+使用 `default-features = false` 并启用 `spin` feature（如果你需要 `swmr-cell` 中默认的基于自旋锁的 mutex 实现）：
+
+```toml
+[dependencies]
+smr-swap = { version = "0.8", default-features = false, features = ["spin"] }
 ```
 
 ### 基本用法

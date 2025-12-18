@@ -24,12 +24,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
-name = "antidote"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34fde25430d87a9388dadbe6e34d7f72a462c8b43ac8d309b42b0a8505d7e2a5"
-
-[[package]]
 name = "arc-swap"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -596,7 +590,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smr-swap"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "arc-swap",
  "criterion",
@@ -616,13 +610,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "swmr-cell"
-version = "0.1.7"
+name = "spin"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fb6500edb6761310d101fc751333097c99575777896e67d7e335ddf7dbf17cf"
+checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
 dependencies = [
- "antidote",
+ "lock_api",
+]
+
+[[package]]
+name = "swmr-cell"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6513ba884a7b5f028c1a499b83da2899890d4ec90634c37c4b4add139f05768d"
+dependencies = [
  "loom",
+ "spin",
 ]
 
 [[package]]
