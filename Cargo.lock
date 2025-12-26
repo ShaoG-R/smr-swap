@@ -590,7 +590,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smr-swap"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "arc-swap",
  "criterion",
@@ -619,13 +619,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "swmr-cell"
-version = "0.1.9"
+name = "swmr-barrier"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6513ba884a7b5f028c1a499b83da2899890d4ec90634c37c4b4add139f05768d"
+checksum = "0e1e9daf765af178a33ff5c13f9bc0c9f53e1520aed44fa0c8ae5dc3c355aeee"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "loom",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "swmr-cell"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cf38e37540ca07b1f67b6e2c045f30d0c052c2c5169f767960b94fba12d4d69"
 dependencies = [
  "loom",
  "spin",
+ "swmr-barrier",
 ]
 
 [[package]]

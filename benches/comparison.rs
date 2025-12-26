@@ -2,7 +2,7 @@ use arc_swap::ArcSwap;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use smr_swap::SmrSwap;
 use std::hint::black_box;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -110,6 +110,31 @@ mod mutex_ops {
     #[inline]
     pub fn write_inplace(mutex: &Mutex<Vec<u32>>, i: u64) {
         let mut guard = mutex.lock().unwrap();
+        guard.fill(i as u32);
+    }
+}
+
+/// RwLock 操作 - 原地修改，无内存分配
+mod rwlock_ops {
+    use super::*;
+
+    pub type SharedRwLock = Arc<RwLock<Vec<u32>>>;
+
+    #[inline]
+    pub fn new(size: usize) -> SharedRwLock {
+        Arc::new(RwLock::new(create_data(size)))
+    }
+
+    #[inline]
+    pub fn read(rwlock: &RwLock<Vec<u32>>) {
+        let guard = rwlock.read().unwrap();
+        black_box(&*guard);
+    }
+
+    /// 原地修改，避免内存分配
+    #[inline]
+    pub fn write_inplace(rwlock: &RwLock<Vec<u32>>, i: u64) {
+        let mut guard = rwlock.write().unwrap();
         guard.fill(i as u32);
     }
 }
@@ -409,6 +434,38 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
 
     for num_readers in [4, 8, 16] {
         group.bench_with_input(
+            BenchmarkId::new("mutex", num_readers),
+            &num_readers,
+            |b, &num_readers| {
+                b.iter_custom(|iters| {
+                    let mutex = mutex_ops::new(DATA_SIZE);
+
+                    let start = Instant::now();
+                    thread::scope(|s| {
+                        for _ in 0..NUM_WRITERS {
+                            let mutex = mutex.clone();
+                            s.spawn(move || {
+                                for i in 0..iters {
+                                    mutex_ops::write_inplace(&mutex, i);
+                                }
+                            });
+                        }
+
+                        for _ in 0..num_readers {
+                            let mutex = mutex.clone();
+                            s.spawn(move || {
+                                for _ in 0..iters {
+                                    mutex_ops::read(&mutex);
+                                }
+                            });
+                        }
+                    });
+                    start.elapsed()
+                });
+            },
+        );
+
+        group.bench_with_input(
             BenchmarkId::new("smr_swap", num_readers),
             &num_readers,
             |b, &num_readers| {
@@ -435,38 +492,6 @@ fn bench_multi_writer_multi_reader(c: &mut Criterion) {
                             s.spawn(move || {
                                 for _ in 0..iters {
                                     smr_ops::read(&reader);
-                                }
-                            });
-                        }
-                    });
-                    start.elapsed()
-                });
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("mutex", num_readers),
-            &num_readers,
-            |b, &num_readers| {
-                b.iter_custom(|iters| {
-                    let mutex = mutex_ops::new(DATA_SIZE);
-
-                    let start = Instant::now();
-                    thread::scope(|s| {
-                        for _ in 0..NUM_WRITERS {
-                            let mutex = mutex.clone();
-                            s.spawn(move || {
-                                for i in 0..iters {
-                                    mutex_ops::write_inplace(&mutex, i);
-                                }
-                            });
-                        }
-
-                        for _ in 0..num_readers {
-                            let mutex = mutex.clone();
-                            s.spawn(move || {
-                                for _ in 0..iters {
-                                    mutex_ops::read(&mutex);
                                 }
                             });
                         }
@@ -753,6 +778,38 @@ fn bench_swmr_read_write_ratio(c: &mut Criterion) {
                             s.spawn(move || {
                                 for _ in 0..read_iters {
                                     arc_ops::read(&reader);
+                                }
+                            });
+                        }
+                    });
+                    start.elapsed()
+                });
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("rwlock", ratio_name),
+            &(read_mult, write_mult),
+            |b, &(read_mult, write_mult)| {
+                b.iter_custom(|iters| {
+                    let rwlock = rwlock_ops::new(DATA_SIZE);
+
+                    let read_iters = iters * read_mult as u64;
+                    let write_iters = iters * write_mult as u64;
+
+                    let start = Instant::now();
+                    thread::scope(|s| {
+                        let writer = rwlock.clone();
+                        s.spawn(move || {
+                            for i in 0..write_iters {
+                                rwlock_ops::write_inplace(&writer, i);
+                            }
+                        });
+
+                        for _ in 0..NUM_READERS {
+                            let reader = rwlock.clone();
+                            s.spawn(move || {
+                                for _ in 0..read_iters {
+                                    rwlock_ops::read(&reader);
                                 }
                             });
                         }

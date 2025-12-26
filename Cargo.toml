@@ -1,6 +1,6 @@
 [package]
 name = "smr-swap"
-version = "0.8.6"
+version = "0.8.7"
 edition = "2024"
 authors = ["ShaoG <shaog.rs@gmail.com>"]
 description = "A minimal-locking, high-performance Single-Writer Multiple-Reader swap container using epoch-based memory reclamation"
@@ -24,7 +24,7 @@ loom = ["dep:loom", "swmr-cell/loom"]
 
 [dependencies]
 loom = { version = "0.7", optional = true }
-swmr-cell = { version = "0.1.9", default-features = false }
+swmr-cell = { version = "0.1.10", default-features = false }
 
 [[bench]]
 name = "comparison"
