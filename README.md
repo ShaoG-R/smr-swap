@@ -26,7 +26,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-smr-swap = "0.8"
+smr-swap = "0.9"
 ```
 
 ### no_std Usage
@@ -35,7 +35,7 @@ Use with `default-features = false` and enable `spin` feature (if you need the d
 
 ```toml
 [dependencies]
-smr-swap = { version = "0.8", default-features = false, features = ["spin"] }
+smr-swap = { version = "0.9", default-features = false, features = ["spin"] }
 ```
 
 ### Basic Usage

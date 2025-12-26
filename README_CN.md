@@ -26,7 +26,7 @@
 
 ```toml
 [dependencies]
-smr-swap = "0.8"
+smr-swap = "0.9"
 ```
 
 ### no_std 用法
@@ -35,7 +35,7 @@ smr-swap = "0.8"
 
 ```toml
 [dependencies]
-smr-swap = { version = "0.8", default-features = false, features = ["spin"] }
+smr-swap = { version = "0.9", default-features = false, features = ["spin"] }
 ```
 
 ### 基本用法
