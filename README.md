@@ -245,61 +245,71 @@ RAII guard, implements `Deref<Target = T>` and `AsRef<T>`, protects data from re
 
 ## Performance
 
+Since smr-swap v0.9.0, the default strategy is **Write-Preferred**. The previous **Read-Preferred** strategy is available via the `read-preferred` feature.
+
 Benchmark results comparing SMR-Swap against `arc-swap` (Windows, Bench mode, Intel Core i9-13900KS).
 
 ### Benchmark Summary
 
-| Scenario | SMR-Swap | ArcSwap | Improvement |
-|----------|----------|---------|-------------|
-| Single-Thread Read | 0.90 ns | 9.19 ns | **90% faster** |
-| Single-Thread Write | 89.81 ns | 104.79 ns | **14% faster** |
-| Multi-Thread Read (2) | 0.90 ns | 9.19 ns | **90% faster** |
-| Multi-Thread Read (4) | 0.92 ns | 9.30 ns | **90% faster** |
-| Multi-Thread Read (8) | 0.94 ns | 9.60 ns | **90% faster** |
-| Mixed R/W (1W+2R) | 86.01 ns | 424.02 ns | **80% faster** |
-| Mixed R/W (1W+4R) | 86.03 ns | 426.10 ns | **80% faster** |
-| Mixed R/W (1W+8R) | 86.75 ns | 502.69 ns | **83% faster** |
-| Batch Read | 1.62 ns | 9.58 ns | **83% faster** |
-| Read with Held Guard | 84.96 ns | 886.14 ns | **90% faster** |
-| Read Under Memory Pressure | 781.29 ns | 1.62 µs | **52% faster** |
+| Scenario | SMR-Swap (Write-Pref) | SMR-Swap (Read-Pref) | ArcSwap |
+|----------|-----------------------|----------------------|---------|
+| Single-Thread Read | **4.49 ns** | **0.90 ns** | 9.19 ns |
+| Single-Thread Write | **54.84 ns** | 89.81 ns | 104.05 ns |
+| Multi-Thread Read (2) | **4.81 ns** | **0.90 ns** | 9.23 ns |
+| Multi-Thread Read (4) | **4.98 ns** | **0.92 ns** | 9.33 ns |
+| Multi-Thread Read (8) | **5.10 ns** | **0.94 ns** | 9.42 ns |
+| Mixed R/W (1W+2R) | **66.10 ns** | 86.01 ns | 428.14 ns |
+| Mixed R/W (1W+4R) | **71.87 ns** | 86.03 ns | 429.16 ns |
+| Mixed R/W (1W+8R) | **76.63 ns** | 86.75 ns | 470.58 ns |
+| Batch Read | **5.52 ns** | **1.62 ns** | 9.61 ns |
+| Read with Held Guard | **55.43 ns** | 84.96 ns | 891.63 ns |
+| Read Under Memory Pressure | **816.01 ns** | 781.29 ns | 1.71 µs |
 
 ### Single-Writer Read/Write Ratio (1 Writer + 2 Readers)
 
-| R/W Ratio | SMR-Swap | RwLock | Mutex | Notes |
-|-----------|----------|--------|-------|-------|
-| 100:1 | 251.49 ns | 5.79 µs | 6.18 µs | SMR 96% faster than Mutex |
-| 10:1 | 101.09 ns | 654.10 ns | 715.95 ns | SMR 86% faster than Mutex |
-| 1:1 | 87.26 ns | 129.99 ns | 147.57 ns | SMR 41% faster than Mutex |
-| 1:10 | 857.83 ns | 233.59 ns | 230.25 ns | Mutex 73% faster than SMR |
-| 1:100 | 8.52 µs | 1.04 µs | 999.18 ns | Mutex 88% faster than SMR |
+| R/W Ratio | SMR-Swap (Write-Pref) | SMR-Swap (Read-Pref) | RwLock | Mutex |
+|-----------|-----------------------|----------------------|--------|-------|
+| 100:1 | 572.00 ns | 251.49 ns | 5.60 µs | 6.08 µs |
+| 10:1 | 144.41 ns | 101.09 ns | 634.45 ns | 713.28 ns |
+| 1:1 | 66.59 ns | 87.26 ns | 129.66 ns | 127.39 ns |
+| 1:10 | 567.56 ns | 857.83 ns | 238.46 ns | 218.87 ns |
+| 1:100 | 5.55 µs | 8.52 µs | 1.05 µs | 970.69 ns |
 
 ### Multi-Writer Multi-Reader (SMR-Swap wrapped in Mutex)
 
-| Config | SMR-Swap | Mutex | ArcSwap | Notes |
-|--------|----------|-------|---------|-------|
-| 4W+4R | 2.03 µs | 459.86 ns | 1.82 µs | Mutex is fastest |
-| 4W+8R | 2.10 µs | 778.83 ns | 2.22 µs | Mutex is fastest |
-| 4W+16R | 2.04 µs | 1.25 µs | 2.83 µs | SMR 28% faster than ArcSwap |
+| Config | SMR-Swap (Write-Pref) | SMR-Swap (Read-Pref) | Mutex | ArcSwap |
+|--------|-----------------------|----------------------|-------|---------|
+| 4W+4R | 506.46 ns | 2.03 µs | 497.52 ns | 1.93 µs |
+| 4W+8R | 516.46 ns | 2.10 µs | 818.02 ns | 2.24 µs |
+| 4W+16R | 516.20 ns | 2.04 µs | 1.26 µs | 2.93 µs |
 
 ### Operational Overhead
 
-| Operation | SMR-Swap | ArcSwap | Mutex | Notes |
-|-----------|----------|---------|-------|-------|
-| Creation | ~159 ns | ~136 ns | ~49 ns | Higher setup cost for SMR |
-| Drop | ~78 ns | ~108 ns | ~41 ns | SMR drop is faster than ArcSwap |
-| Handle Clone | ~57 ns | ~9 ns | ~9 ns | LocalReader clone is heavier than Arc clone |
-| Local Check | ~0.18 ns | N/A | N/A | `is_pinned`/`version` are extremely cheap |
+| Operation | SMR-Swap (Write-Pref) | SMR-Swap (Read-Pref) | ArcSwap | Mutex |
+|-----------|-----------------------|----------------------|---------|-------|
+| Creation | ~152 ns | ~159 ns | ~131 ns | ~49 ns |
+| Drop | ~81 ns | ~78 ns | ~108 ns | ~41 ns |
+| Handle Clone | ~57 ns | ~57 ns | ~9 ns | ~9 ns |
+| Local Check | ~0.18 ns | ~0.18 ns | N/A | N/A |
 
 ### Analysis
 
-- **Excellent Read Performance**: Sub-nanosecond latency (~0.9 ns) for both single and multi-thread reads, ~10x faster than ArcSwap
-- **Linear Scaling**: Multi-thread read performance remains nearly constant regardless of thread count
-- **Stable Mixed Workload**: Maintains ~86 ns latency under 1 writer + N readers scenarios, significantly faster than ArcSwap (~425ns)
-- **Optimal for Read-Heavy Workloads**: At 100:1 and 10:1 R/W ratios, SMR-Swap dominates, 86-96% faster than Mutex
-- **Write-Heavy Workloads**: At higher write ratios (1:10, 1:100), Mutex has better write efficiency
-- **Multi-Writer Performance**: Mutex typically outperforms both SMR-Swap and ArcSwap in multi-writer scenarios, though SMR-Swap scales better than ArcSwap at higher reader counts (16+)
-- **Good Under Memory Pressure**: Aggressive GC ensures stable performance under memory pressure
-- **Operational Overhead**: Higher creation/cloning cost (vs simple Arc), but negligible local status checks and faster drop performance
+- **Write-Preferred (Default)**:
+  - **Balanced Performance**: Better trade-off between read and write performance.
+  - **Mechanism**: Uses **Symmetric Memory Barriers**, distributing synchronization overhead across both reads and writes.
+  - **Fast Multi-Threaded Writes**: Significantly faster in mixed read/write and multi-writer scenarios (Avg ~500ns in 4W+4R vs ~2µs in Read-Preferred).
+  - **Good Read Performance**: Read latency (~4.5ns) is higher than Read-Preferred (~0.9ns) but still ~2x faster than ArcSwap (~9.2ns).
+
+- **Read-Preferred (Feature)**:
+  - **Ultimate Read Performance**: Sub-nanosecond read latency (~0.9ns), ideal for read-heavy (>99% reads) workloads.
+  - **Mechanism**: Uses **Asymmetric Memory Barriers** (Heavy-Write/Light-Read), shifting synchronization overhead almost entirely to the writer.
+  - **Slower Writes**: Write operations are more expensive due to reader checking overhead and heavy barriers.
+  - **Poor Multi-Writer Scaling**: Heavy contention in multi-writer scenarios.
+
+- **Comparison**:
+  - **Reads**: Read-Preferred > Write-Preferred > ArcSwap > Mutex
+  - **Writes**: Mutex > Write-Preferred > Read-Preferred > ArcSwap
+  - **Mixed**: Write-Preferred > Read-Preferred > ArcSwap
 
 ## Design
 
